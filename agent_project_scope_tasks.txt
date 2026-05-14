@@ -1,0 +1,944 @@
+Project Scope & In-Scope Task List
+Project: PostgreSQL-backed Multi-source Financial / Enterprise Data Analysis Agent Platform
+
+============================================================
+1. Project Positioning
+============================================================
+
+Build a PostgreSQL-backed multi-source financial / enterprise data analysis agent platform.
+
+Users can register, log in, upload Excel / CSV datasets, persist datasets in their personal workspace, view automatically generated Data Catalogs, and later select saved datasets for AI-assisted analysis.
+
+The Agent uses a LangGraph-based workflow to load dataset context, classify intent, perform safety checks, plan tasks, call analysis tools, generate charts, produce final insights, and save all chat history, structured analysis results, tool traces, and reports into PostgreSQL.
+
+Redis is intentionally out of the demo scope. Short-term caching, rate limiting, and async task coordination can be listed as future work.
+
+Core engineering focus:
+- User workspace
+- Persistent dataset management
+- Data Catalog generation
+- Agent workflow orchestration
+- Tool Harness
+- Python-based data analysis
+- Chart generation
+- Safety guardrails
+- PostgreSQL-backed chat history and trace persistence
+- Resume-ready engineering demo
+
+============================================================
+2. User Experience Journey
+============================================================
+
+User opens platform
+  -> Register / Log in
+  -> Enter personal Workspace
+  -> Upload Excel / CSV dataset
+  -> System validates and stores file
+  -> System parses dataset and generates Data Catalog
+  -> User views dataset details and schema
+  -> User selects dataset for analysis
+  -> User asks natural language business / financial question
+  -> Agent loads dataset schema and session context
+  -> Agent classifies intent and checks safety
+  -> Agent plans analysis tasks
+  -> Agent calls tools through Tool Harness
+  -> System displays table, chart, final insight, and agent trace
+  -> User asks follow-up questions
+  -> System loads previous session context from PostgreSQL
+  -> User generates and saves report
+  -> User later returns to reuse saved datasets and historical analysis sessions
+
+============================================================
+3. P0 / P1 / P2 Scope Summary
+============================================================
+
+P0 - Must be included in demo scope:
+- User registration and login
+- User Workspace
+- Excel / CSV upload
+- PostgreSQL dataset persistence
+- Schema inference
+- Data Catalog
+- Dataset detail page
+- Analysis session persistence
+- Chat history persistence
+- LangGraph basic workflow
+- Intent Router
+- Task Planner
+- Tool Harness
+- Schema Inspection Tool
+- Python Analysis Tool
+- Chart Generation Tool
+- Safety Guardrail
+- Agent Chat UI
+- Tool Trace Logging
+- README
+- Architecture Diagram
+
+P1 - Strongly recommended, but can be second-stage:
+- Report Generation
+- Saved Reports
+- External Financial Data Mock Connector
+- Evaluation Test Cases
+- Basic Metrics Summary
+- Better multi-sheet Excel support
+- Editable field descriptions
+- Recent Sessions page optimization
+
+P2 - Out of first demo scope:
+- Redis cache
+- Real Wind API
+- Full MCP server / client
+- Real external PostgreSQL connection configuration
+- Complex SQL Agent
+- Multi-tenant organization permission system
+- RBAC
+- S3 / OSS object storage
+- Kubernetes
+- High-concurrency stress testing
+- Complex BI dashboard builder
+
+============================================================
+4. In-Scope Task List
+============================================================
+
+------------------------------------------------------------
+A. Project Setup
+------------------------------------------------------------
+
+A1. Repository Setup
+- Create GitHub repository.
+- Create backend / frontend / docs / data / storage directories.
+- Add .gitignore.
+- Add .env.example.
+- Add initial README.
+
+Acceptance Criteria:
+- Repository can be cloned and understood.
+- Directory structure is clear.
+- No secrets are committed.
+
+A2. Local Development Setup
+- Initialize FastAPI backend.
+- Initialize React frontend.
+- Configure local PostgreSQL.
+- Configure Docker Compose for PostgreSQL.
+- Connect backend to PostgreSQL.
+- Initialize Alembic migration.
+
+Acceptance Criteria:
+- Backend can start locally.
+- Frontend can start locally.
+- PostgreSQL can run locally.
+- Database connection works.
+
+A3. Health Check
+- Implement GET /api/health.
+- Check backend status.
+- Check PostgreSQL connection.
+
+Acceptance Criteria:
+- Health endpoint returns service status.
+- Health endpoint reports database connection status.
+
+------------------------------------------------------------
+B. Authentication & User Workspace
+------------------------------------------------------------
+
+B1. User Model
+- Create users table.
+- Implement password hashing.
+- Enforce unique email.
+
+Table:
+users
+- id
+- email
+- hashed_password
+- created_at
+- updated_at
+
+Acceptance Criteria:
+- User can register.
+- Duplicate email is rejected.
+- Password is not stored in plaintext.
+
+B2. Auth APIs
+- POST /api/auth/register
+- POST /api/auth/login
+- GET /api/auth/me
+
+Acceptance Criteria:
+- User can register.
+- User can log in.
+- Logged-in user can retrieve current user info.
+
+B3. JWT Auth
+- Generate JWT token after login.
+- Validate JWT token.
+- Implement current_user dependency.
+- Protect private APIs.
+
+Acceptance Criteria:
+- Protected APIs reject unauthenticated requests.
+- Token-based authentication works.
+
+B4. Frontend Auth
+- Build Register page.
+- Build Login page.
+- Store token on login.
+- Implement logout.
+- Implement protected routes.
+
+Acceptance Criteria:
+- User can log in from frontend.
+- Logged-out user cannot access Workspace.
+- Logout clears user session.
+
+B5. Workspace Dashboard
+- Show My Datasets.
+- Show Recent Analysis Sessions.
+- Show Saved Reports.
+- Provide Upload Dataset button.
+
+Acceptance Criteria:
+- Workspace is the main user entry after login.
+- User only sees their own resources.
+
+------------------------------------------------------------
+C. Dataset Upload & Storage
+------------------------------------------------------------
+
+C1. Upload API
+- Implement POST /api/datasets/upload.
+- Support .csv upload.
+- Support .xlsx upload.
+- Validate file type.
+- Validate file size.
+- Save raw file to local storage.
+
+Acceptance Criteria:
+- User can upload CSV.
+- User can upload Excel.
+- Invalid file type is rejected.
+- Uploaded file is associated with current user.
+
+C2. Dataset Metadata
+- Create datasets table.
+- Save user_id.
+- Save file_path.
+- Save status.
+- Save row_count / column_count / sheet_count.
+
+Table:
+datasets
+- id
+- user_id
+- name
+- description
+- original_filename
+- file_type
+- file_path
+- status
+- row_count
+- column_count
+- sheet_count
+- created_at
+- updated_at
+
+Acceptance Criteria:
+- Dataset metadata is persisted.
+- Dataset status can be uploaded / processing / ready / failed.
+- Dataset belongs to the correct user.
+
+C3. File Parser
+- Implement CSV parser.
+- Implement Excel parser.
+- Support multi-sheet Excel as P1.
+- Handle parse failures.
+
+Acceptance Criteria:
+- CSV files can be parsed.
+- Excel files can be parsed.
+- Failed parsing updates dataset status to failed.
+
+C4. Dataset APIs
+- GET /api/datasets
+- GET /api/datasets/{dataset_id}
+- DELETE /api/datasets/{dataset_id}
+
+Acceptance Criteria:
+- User can list their datasets.
+- User can view dataset detail.
+- User can delete their own dataset.
+- User cannot access or delete another user's dataset.
+
+C5. Dataset Frontend
+- Build Dataset List.
+- Build Dataset Detail.
+- Support Dataset Delete.
+- Show Upload Status.
+
+Acceptance Criteria:
+- User can view uploaded datasets.
+- User can open dataset detail page.
+- Dataset status is visible.
+
+------------------------------------------------------------
+D. Data Catalog & Schema Inference
+------------------------------------------------------------
+
+D1. Schema Inference
+- Infer column type.
+- Calculate missing rate.
+- Extract sample values.
+- Detect date / numeric / category fields.
+
+Acceptance Criteria:
+- Every uploaded dataset has inferred schema.
+- Each column has a data type.
+- Missing rate and sample values are available.
+
+D2. Sensitive Field Detection
+- Detect sensitive fields such as email, phone, name, credit_score, id_card, customer_id.
+- Assign sensitivity_tag.
+
+Sensitivity tags:
+- non_sensitive
+- identifier
+- pii
+- financial_sensitive
+
+Acceptance Criteria:
+- Obvious sensitive fields are marked.
+- Sensitivity tag is persisted.
+- Safety module can use sensitivity metadata.
+
+D3. Dataset Schema Persistence
+- Create dataset_schemas table.
+- Save sheet_name.
+- Save column_name.
+- Save data_type.
+- Save sensitivity_tag.
+- Save description.
+
+Table:
+dataset_schemas
+- id
+- dataset_id
+- sheet_name
+- column_name
+- data_type
+- nullable
+- missing_rate
+- sample_values_json
+- sensitivity_tag
+- description
+- created_at
+
+Acceptance Criteria:
+- Schema records are saved for uploaded datasets.
+- Data Catalog can read from PostgreSQL.
+
+D4. Data Catalog APIs
+- GET /api/datasets/{dataset_id}/schema
+- GET /api/datasets/{dataset_id}/preview
+- PATCH /api/datasets/{dataset_id}/schema/{schema_id} optional
+
+Acceptance Criteria:
+- User can view schema.
+- User can view data preview.
+- Optional: user can edit field descriptions.
+
+D5. Data Catalog Frontend
+- Build Schema Table.
+- Build Data Preview.
+- Optional: build field description editor.
+
+Acceptance Criteria:
+- Dataset detail page shows Data Catalog.
+- Sensitive fields are visible as tags.
+- Data preview is available.
+
+------------------------------------------------------------
+E. Analysis Session & Chat History
+------------------------------------------------------------
+
+E1. Analysis Session Model
+- Create analysis_sessions table.
+- Bind session to user_id.
+- Bind session to dataset_id.
+- Save title.
+- Save current_topic.
+- Save last_result_summary_json.
+
+Table:
+analysis_sessions
+- id
+- user_id
+- dataset_id
+- title
+- current_topic
+- current_intent
+- current_filters_json
+- last_result_summary_json
+- created_at
+- updated_at
+
+Acceptance Criteria:
+- A session is created when user starts analysis.
+- Session belongs to a user and dataset.
+- Session context can be updated.
+
+E2. Session APIs
+- POST /api/analysis-sessions
+- GET /api/analysis-sessions
+- GET /api/analysis-sessions/{session_id}
+
+Acceptance Criteria:
+- User can create an analysis session.
+- User can list historical sessions.
+- User can reopen a session.
+
+E3. Message Model
+- Create analysis_messages table.
+- Save user message.
+- Save assistant message.
+- Save structured_result_json.
+
+Table:
+analysis_messages
+- id
+- session_id
+- role
+- content
+- structured_result_json
+- created_at
+
+Acceptance Criteria:
+- Each user query is saved.
+- Each agent response is saved.
+- Structured results can be restored later.
+
+E4. Message APIs
+- GET /api/analysis-sessions/{session_id}/messages
+- Save each agent query and response.
+
+Acceptance Criteria:
+- Historical chat messages can be retrieved.
+- Reloading session restores previous messages.
+
+E5. Chat History Frontend
+- Display historical messages.
+- Reopen session.
+- Continue historical session.
+
+Acceptance Criteria:
+- User can continue previous analysis.
+- Chat history is persistent.
+
+------------------------------------------------------------
+F. LangGraph Agent Workflow
+------------------------------------------------------------
+
+F1. AgentState Design
+Fields:
+- user_id
+- dataset_id
+- session_id
+- user_query
+- conversation_history
+- dataset_schema
+- intent
+- plan
+- tool_results
+- analysis_result
+- chart_spec
+- final_answer
+- safety_flag
+- trace_id
+- error
+
+Acceptance Criteria:
+- AgentState passes through workflow nodes.
+- README explains AgentState design.
+
+F2. Workflow Nodes
+Implement:
+- load_context
+- classify_intent
+- safety_check
+- retrieve_schema
+- plan_task
+- execute_tools
+- generate_response
+- save_result
+
+Acceptance Criteria:
+- LangGraph workflow runs end-to-end.
+- Each node has a clear responsibility.
+- Workflow returns structured output.
+
+F3. Agent Query API
+- POST /api/agent/query.
+- Validate dataset ownership.
+- Create trace_id.
+- Call LangGraph workflow.
+- Return structured result.
+
+Acceptance Criteria:
+- User can ask questions about selected dataset.
+- Agent response includes intent, plan, chart_spec, final_answer, trace_id.
+- Unauthorized dataset access is rejected.
+
+F4. Fallback Handling
+- Unsupported question fallback.
+- Tool error fallback.
+- Insufficient data fallback.
+- Unsafe request fallback.
+
+Acceptance Criteria:
+- Agent failures return controlled responses.
+- Backend does not crash on tool errors.
+
+------------------------------------------------------------
+G. Intent Router
+------------------------------------------------------------
+
+G1. Supported Intents
+Implement at least:
+- metric_lookup
+- trend_analysis
+- breakdown_analysis
+- root_cause_analysis
+- comparison_analysis
+- visualization_request
+- metadata_question
+- follow_up_question
+- report_generation
+- unsafe_request
+
+Acceptance Criteria:
+- Router supports at least 8 intent types.
+- Router returns structured JSON.
+
+G2. Structured Router Output
+Example:
+{
+  "intent": "trend_analysis",
+  "confidence": 0.91,
+  "requires_chart": true,
+  "requires_memory": false,
+  "requires_external_data": false
+}
+
+Acceptance Criteria:
+- Output is machine-readable.
+- Planner can consume router output.
+
+G3. Follow-up Detection
+Support:
+- What about by region?
+- Compare it with last quarter.
+- Summarize this.
+- Export it as report.
+
+Acceptance Criteria:
+- Follow-up questions use previous session context from PostgreSQL.
+- Follow-up is not treated as completely new query.
+
+------------------------------------------------------------
+H. Task Planner
+------------------------------------------------------------
+
+H1. Plan Generation
+Generate steps based on intent:
+- schema inspection
+- data profiling
+- python analysis
+- chart generation
+- response generation
+
+Acceptance Criteria:
+- Complex query generates multi-step plan.
+- Simple query generates simple plan.
+
+H2. Plan Structure
+Each step includes:
+- step_id
+- task
+- tool_name
+- expected_output
+
+Acceptance Criteria:
+- Plan is structured.
+- Tool Executor can consume plan.
+
+H3. Plan Display
+- Frontend displays plan / agent steps.
+
+Acceptance Criteria:
+- User can see how Agent approached the task.
+
+------------------------------------------------------------
+I. Tool Harness
+------------------------------------------------------------
+
+I1. Tool Registry
+Each tool includes:
+- name
+- description
+- input_schema
+- output_schema
+- permission
+- timeout
+- retry_policy
+
+Acceptance Criteria:
+- Tools are registered centrally.
+- New tools can be added through registry.
+
+I2. Tool Executor
+Uniformly handle:
+- input validation
+- permission check
+- execution
+- error handling
+- latency tracking
+- output normalization
+
+Acceptance Criteria:
+- All tools are called through Tool Executor.
+- Tool failures are captured.
+
+I3. Tool Trace Persistence
+- Save tool execution trace into tool_traces table.
+
+Table:
+tool_traces
+- id
+- session_id
+- message_id
+- trace_id
+- tool_name
+- input_summary_json
+- output_summary_json
+- status
+- latency_ms
+- error_message
+- created_at
+
+Acceptance Criteria:
+- Each tool call has trace record.
+- Trace can be displayed in frontend.
+
+I4. Standard Tool Output
+Example:
+{
+  "tool_name": "python_analysis_tool",
+  "status": "success",
+  "latency_ms": 520,
+  "output": {},
+  "error": null
+}
+
+Acceptance Criteria:
+- All tools return standard output format.
+
+------------------------------------------------------------
+J. Core Tools
+------------------------------------------------------------
+
+J1. Schema Inspection Tool
+- Read dataset schema.
+- Return field types.
+- Return sensitivity tags.
+- Return field descriptions.
+
+Acceptance Criteria:
+- Agent can understand dataset fields.
+
+J2. Data Profile Tool
+- row count
+- column count
+- numeric summary
+- missing rate
+- category distribution
+- date range
+
+Acceptance Criteria:
+- User can ask for dataset summary.
+- Profile output is structured.
+
+J3. Python Analysis Tool
+Support:
+- metric lookup
+- trend analysis
+- breakdown analysis
+- comparison analysis
+- contribution analysis
+- summary statistics
+
+Acceptance Criteria:
+- Tool performs Pandas-based analysis.
+- Output is structured JSON.
+
+J4. Chart Generation Tool
+Support:
+- line chart
+- bar chart
+- stacked bar chart
+- pie chart
+- table fallback
+
+Acceptance Criteria:
+- Tool outputs chart spec.
+- Frontend can render chart spec.
+- Incompatible data returns table fallback.
+
+J5. Safety Check Tool
+- Detect sensitive field requests.
+- Detect unsupported query.
+- Decide whether detail-level output is allowed.
+- Generate safe alternative suggestion.
+
+Acceptance Criteria:
+- PII detail request is blocked.
+- Aggregated analysis is allowed.
+
+J6. Report Generation Tool - P1
+- Generate markdown executive summary.
+- Save report.
+
+Acceptance Criteria:
+- User can generate a report from an analysis session.
+
+J7. External Financial Data Tool - P1
+- Mock industry benchmark.
+- Mock macro indicator.
+- Compare with internal dataset.
+
+Acceptance Criteria:
+- Agent can call external financial data tool.
+- External tool result can be used in analysis.
+
+J8. Optional SQL Connector - P2
+- SQLite / PostgreSQL read-only connector.
+- inspect schema.
+- execute SELECT only.
+
+Acceptance Criteria:
+- SQL connector is optional and not a blocker.
+
+------------------------------------------------------------
+K. Safety & Compliance
+------------------------------------------------------------
+
+K1. File Upload Safety
+- Validate file type.
+- Limit file size.
+- Detect empty file.
+- Sanitize file name.
+
+Acceptance Criteria:
+- Unsafe files are rejected.
+
+K2. Sensitive Field Tagging
+- Mark sensitive fields at schema level.
+
+Acceptance Criteria:
+- Sensitive fields are stored with sensitivity_tag.
+
+K3. Query Safety
+- Block detail-level PII query.
+- Allow aggregated analysis.
+- Return safe alternative suggestion.
+
+Acceptance Criteria:
+- Unsafe user request does not expose PII.
+
+K4. Grounded Response
+- Final answer must be based on analysis_result.
+- If data is insufficient, mention limitation.
+- Do not invent fields or metrics.
+
+Acceptance Criteria:
+- Agent response is grounded and honest.
+
+------------------------------------------------------------
+L. Frontend Agent Experience
+------------------------------------------------------------
+
+L1. Agent Chat Page
+Include:
+- dataset context panel
+- chat input
+- agent step trace
+- table result
+- chart panel
+- final insight
+- safety info
+
+Acceptance Criteria:
+- User can ask questions and view full analysis result.
+
+L2. Result Rendering
+- Render markdown final answer.
+- Render table.
+- Render chart spec.
+- Render tool trace.
+
+Acceptance Criteria:
+- Structured output from backend is visible and understandable.
+
+L3. Multi-turn Chat
+- Continue within same session.
+- Show historical messages.
+- Support follow-up.
+
+Acceptance Criteria:
+- User can ask at least 2-3 follow-up questions in same session.
+
+------------------------------------------------------------
+M. Reports
+------------------------------------------------------------
+
+M1. Report Generation - P1
+- Generate report from current session.
+- Include key findings, chart summary, limitations.
+
+Acceptance Criteria:
+- Report content is generated from structured analysis results.
+
+M2. Report Persistence
+- Create saved_reports table.
+- Save report_content.
+- Bind report to user / dataset / session.
+
+Table:
+saved_reports
+- id
+- user_id
+- dataset_id
+- session_id
+- title
+- report_type
+- report_path
+- report_content
+- created_at
+
+Acceptance Criteria:
+- Report is saved and can be reopened.
+
+M3. Report Frontend
+- Report preview.
+- Saved reports list.
+
+Acceptance Criteria:
+- User can view saved reports.
+
+------------------------------------------------------------
+N. Evaluation & Observability
+------------------------------------------------------------
+
+N1. Tool Trace View
+- Display each tool call.
+- Display latency.
+- Display success / failed status.
+
+Acceptance Criteria:
+- User or developer can inspect execution trace.
+
+N2. Basic Metrics - P1
+Track:
+- tool_call_success_rate
+- average_latency
+- unsafe_query_block_count
+- analysis_success_count
+- fallback_count
+
+Acceptance Criteria:
+- Metrics can be summarized from trace records.
+
+N3. Evaluation Cases - P1
+Prepare demo questions covering:
+- metric lookup
+- trend analysis
+- breakdown
+- root cause
+- metadata question
+- follow-up
+- report generation
+- unsafe request
+- external benchmark
+
+Acceptance Criteria:
+- Evaluation cases can be run manually or scripted.
+- README shows sample evaluation results.
+
+------------------------------------------------------------
+O. Documentation & Resume Packaging
+------------------------------------------------------------
+
+O1. README
+Include:
+- Project Overview
+- Motivation
+- Tech Stack
+- Architecture Diagram
+- User Journey
+- Core Features
+- Database Schema
+- Agent Workflow
+- Tool Harness
+- Data Catalog
+- Safety Design
+- Demo Questions
+- Setup Guide
+- Known Limitations
+- Future Work
+
+Acceptance Criteria:
+- README helps a new developer understand and run the project.
+
+O2. Architecture Diagrams
+At least:
+- System Architecture
+- Agent Workflow
+
+Acceptance Criteria:
+- Diagrams clearly show frontend, backend, PostgreSQL, Agent, Tool Harness, and tools.
+
+O3. Demo Script
+2-3 minute demo:
+1. Login
+2. Upload dataset
+3. View Data Catalog
+4. Ask analysis question
+5. Show Agent trace
+6. Show chart and insight
+7. Ask follow-up
+8. Show safety block
+9. Save report
+
+Acceptance Criteria:
+- Demo can be delivered smoothly in interview.
+
+O4. Resume Bullets
+Draft resume bullets based on completed implementation.
+
+Acceptance Criteria:
+- Resume bullets reflect actual completed features.
+- Avoid overstating Redis, distributed systems, high concurrency, or real MCP if not implemented.
+
+============================================================
+5. Final Scope Statement
+============================================================
+
+Build a PostgreSQL-backed multi-source financial / enterprise data analysis agent platform.
+
+Users can register, log in, upload and save Excel / CSV datasets, and the system automatically parses uploaded files, persists dataset metadata, generates a Data Catalog, and allows users to reuse saved datasets in future AI analysis sessions.
+
+The Agent uses a LangGraph workflow to load user-specific dataset context, classify user intent, perform safety checks, plan analysis tasks, call tools through a Tool Harness, run Python-based analysis, generate chart specifications, and produce grounded business insights.
+
+All datasets, schemas, analysis sessions, chat messages, structured results, tool traces, and saved reports are persisted in PostgreSQL. The first demo scope intentionally excludes Redis and large-scale distributed infrastructure, while leaving caching, rate limiting, async processing, real external database connectors, and MCP integration as future work.

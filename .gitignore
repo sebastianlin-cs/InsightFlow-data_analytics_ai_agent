@@ -1,0 +1,45 @@
+# Python virtual environment
+venv/
+.venv/
+env/
+ENV/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# Environment variables
+.env
+*.env
+!.env.example
+
+# IDE
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Local uploaded files
+backend/storage/
+storage/
+uploads/
+
+# Local database files
+*.sqlite3
+*.db
+
+# Frontend future
+node_modules/
+dist/
+build/
+
+# Temporary files
+tmp/
+temp/

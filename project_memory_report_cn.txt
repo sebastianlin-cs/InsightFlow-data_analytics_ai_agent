@@ -1,0 +1,558 @@
+项目记忆报告：多数据源金融/企业数据分析 Agent 平台
+
+一、项目概述
+
+本项目是一个基于 PostgreSQL 持久化的多数据源金融/企业数据分析 Agent 平台。
+
+用户可以注册登录，上传 Excel / CSV 数据集。系统会保存数据集、解析文件、生成 Data Catalog，并支持用户后续选择历史数据集进行自然语言数据分析。
+
+Agent 基于 LangGraph 编排分析流程，完成上下文加载、意图识别、安全检查、任务规划、工具调用、Python 数据分析、图表生成和结果解释。
+
+系统会将用户信息、数据集信息、字段元信息、分析会话、聊天记录、Agent 结构化输出、工具调用日志和报告统一保存到 PostgreSQL。
+
+二、核心功能
+
+1. 用户系统
+- 用户注册
+- 用户登录
+- JWT 鉴权
+- 获取当前用户信息
+- 用户只能访问自己的数据集、分析会话和报告
+
+2. 用户 Workspace
+- 展示用户已上传的数据集
+- 展示最近分析会话
+- 展示已保存报告
+- 提供上传数据集入口
+- 提供进入数据集详情和分析页面的入口
+
+3. 数据集上传
+- 支持上传 CSV 文件
+- 支持上传 Excel 文件
+- 校验文件类型
+- 校验文件大小
+- 保存原始文件
+- 创建数据集 metadata
+- 将数据集绑定到当前用户
+
+4. 数据解析
+- 解析 CSV
+- 解析 Excel
+- 读取 sheet 信息
+- 统计行数
+- 统计列数
+- 识别字段名
+- 识别字段类型
+- 生成数据预览
+
+5. Data Catalog
+- 为每个上传数据集生成字段目录
+- 保存字段名称
+- 保存字段类型
+- 保存所属 sheet
+- 保存缺失率
+- 保存样例值
+- 保存字段描述
+- 保存敏感字段标签
+- 支持 Agent 后续读取字段元信息
+
+6. 敏感字段识别
+- 识别姓名字段
+- 识别邮箱字段
+- 识别手机号字段
+- 识别地址字段
+- 识别身份证 / ID 类字段
+- 识别信用分等金融敏感字段
+- 给字段打上 sensitivity_tag
+- 支持后续安全拦截
+
+7. 数据集详情页
+- 展示数据集基本信息
+- 展示 Data Catalog
+- 展示数据预览
+- 展示数据集状态
+- 提供进入 Agent 分析的按钮
+
+8. 分析会话
+- 用户选择一个数据集后创建分析会话
+- 每个分析会话绑定 user_id 和 dataset_id
+- 保存会话标题
+- 保存当前分析主题
+- 保存当前意图
+- 保存当前筛选条件
+- 保存上一轮结果摘要
+- 支持后续继续历史会话
+
+9. 聊天记录
+- 保存用户每一轮问题
+- 保存 Agent 每一轮回答
+- 保存结构化分析结果
+- 保存图表配置
+- 保存最终结论
+- 支持重新打开历史会话后恢复上下文
+
+10. Agent 分析入口
+- 用户在 Agent Chat 页面输入自然语言问题
+- 请求中包含 user_id、dataset_id、session_id 和 user_query
+- 后端校验用户是否拥有该数据集
+- 后端调用 LangGraph Agent workflow
+- 返回意图、计划、工具调用结果、表格、图表和最终回答
+
+三、Agent Workflow
+
+Agent 使用 LangGraph 实现流程编排。
+
+主要节点包括：
+
+1. load_context
+- 加载当前用户信息
+- 加载当前数据集 metadata
+- 加载当前数据集 schema
+- 加载当前分析会话
+- 加载最近聊天记录
+- 加载上一轮分析摘要
+
+2. classify_intent
+- 判断用户问题类型
+- 输出结构化 intent
+- 判断是否需要图表
+- 判断是否需要读取历史上下文
+- 判断是否需要安全检查
+- 判断是否需要报告生成
+
+支持的 intent 包括：
+- metric_lookup：指标查询
+- trend_analysis：趋势分析
+- breakdown_analysis：分组拆解
+- root_cause_analysis：归因分析
+- comparison_analysis：对比分析
+- visualization_request：图表请求
+- metadata_question：字段 / 指标解释
+- follow_up_question：多轮追问
+- report_generation：报告生成
+- unsafe_request：敏感或不安全请求
+
+3. safety_check
+- 检查用户是否请求敏感字段明细
+- 检查是否涉及 PII 数据
+- 检查是否可以转成聚合分析
+- 对不安全请求返回拒绝或替代建议
+
+4. retrieve_schema
+- 读取 Data Catalog
+- 获取字段名、字段类型、字段描述和敏感标签
+- 为后续任务规划和分析工具提供数据上下文
+
+5. plan_task
+- 根据用户意图生成分析步骤
+- 决定需要调用哪些工具
+- 输出结构化 plan
+
+常见计划步骤包括：
+- schema inspection
+- data profiling
+- python analysis
+- chart generation
+- response generation
+- report generation
+
+6. execute_tools
+- 通过 Tool Harness 统一调用工具
+- 执行数据分析
+- 捕获工具错误
+- 记录工具调用日志
+
+7. generate_response
+- 基于分析结果生成最终回答
+- 输出业务解释
+- 输出 limitations
+- 输出 chart_spec
+- 输出 table_result
+
+8. save_result
+- 保存用户问题
+- 保存 Agent 回答
+- 保存结构化结果
+- 保存工具调用 trace
+- 更新 analysis_session 状态
+
+四、Tool Harness
+
+Tool Harness 是统一工具执行层。
+
+作用：
+- 注册工具
+- 校验工具输入
+- 控制工具权限
+- 执行工具
+- 捕获异常
+- 统计耗时
+- 标准化工具输出
+- 保存工具调用日志
+
+每个工具包含：
+- name
+- description
+- input_schema
+- output_schema
+- permission
+- timeout
+- retry_policy
+
+统一工具输出格式：
+- tool_name
+- status
+- latency_ms
+- output
+- error
+
+五、核心工具
+
+1. Schema Inspection Tool
+- 读取数据集 schema
+- 返回字段名称
+- 返回字段类型
+- 返回字段描述
+- 返回敏感标签
+- 帮助 Agent 理解数据结构
+
+2. Data Profile Tool
+- 统计行数
+- 统计列数
+- 统计缺失率
+- 统计数值字段分布
+- 统计类别字段分布
+- 识别日期范围
+- 生成数据集概览
+
+3. Python Analysis Tool
+- 使用 Pandas 对数据进行分析
+- 支持指标查询
+- 支持趋势分析
+- 支持分组分析
+- 支持对比分析
+- 支持贡献度分析
+- 支持基础统计分析
+- 输出结构化分析结果
+
+4. Chart Generation Tool
+- 根据分析结果生成图表配置
+- 支持折线图
+- 支持柱状图
+- 支持堆叠柱状图
+- 支持饼图
+- 支持表格 fallback
+- 输出 chart_spec 给前端渲染
+
+5. Safety Check Tool
+- 检测敏感字段请求
+- 检测不支持的问题
+- 判断是否允许明细级输出
+- 对敏感请求给出安全替代建议
+
+6. Report Generation Tool
+- 根据当前分析会话生成报告
+- 输出 markdown 格式报告
+- 报告包含问题、数据集、关键发现、图表总结、业务解释和局限性
+- 报告保存到 PostgreSQL
+
+7. External Financial Data Mock Tool
+- 提供模拟外部金融数据
+- 支持行业 benchmark
+- 支持宏观指标
+- 支持市场增长率
+- 用于和用户上传的内部数据做对比分析
+
+六、前端页面
+
+1. Landing Page
+- 展示项目用途
+- 提供登录入口
+- 提供注册入口
+
+2. Login Page
+- 用户登录
+- 获取 JWT
+- 登录后进入 Workspace
+
+3. Register Page
+- 用户注册
+- 注册成功后可登录
+
+4. Workspace Dashboard
+- 展示 My Datasets
+- 展示 Recent Sessions
+- 展示 Saved Reports
+- 提供 Upload Dataset 入口
+
+5. Dataset Upload Page / Modal
+- 上传 Excel / CSV
+- 展示上传状态
+- 展示解析状态
+- 上传成功后进入数据集详情页
+
+6. Dataset Detail Page
+- 展示数据集 metadata
+- 展示 Data Catalog
+- 展示数据预览
+- 提供 Analyze this dataset 按钮
+
+7. Agent Chat Page
+- 展示当前数据集上下文
+- 输入自然语言问题
+- 展示 Agent step trace
+- 展示分析表格
+- 展示图表
+- 展示最终洞察
+- 展示安全提示
+- 支持多轮追问
+
+8. Report Page
+- 展示已保存报告
+- 展示报告内容
+- 支持从历史会话查看报告
+
+七、PostgreSQL 数据表
+
+1. users
+- id
+- email
+- hashed_password
+- created_at
+- updated_at
+
+2. datasets
+- id
+- user_id
+- name
+- description
+- original_filename
+- file_type
+- file_path
+- status
+- row_count
+- column_count
+- sheet_count
+- created_at
+- updated_at
+
+3. dataset_schemas
+- id
+- dataset_id
+- sheet_name
+- column_name
+- data_type
+- nullable
+- missing_rate
+- sample_values_json
+- sensitivity_tag
+- description
+- created_at
+
+4. analysis_sessions
+- id
+- user_id
+- dataset_id
+- title
+- current_topic
+- current_intent
+- current_filters_json
+- last_result_summary_json
+- created_at
+- updated_at
+
+5. analysis_messages
+- id
+- session_id
+- role
+- content
+- structured_result_json
+- created_at
+
+6. tool_traces
+- id
+- session_id
+- message_id
+- trace_id
+- tool_name
+- input_summary_json
+- output_summary_json
+- status
+- latency_ms
+- error_message
+- created_at
+
+7. saved_reports
+- id
+- user_id
+- dataset_id
+- session_id
+- title
+- report_type
+- report_path
+- report_content
+- created_at
+
+八、主要 API
+
+1. Auth APIs
+- POST /api/auth/register
+- POST /api/auth/login
+- GET /api/auth/me
+
+2. Dataset APIs
+- POST /api/datasets/upload
+- GET /api/datasets
+- GET /api/datasets/{dataset_id}
+- DELETE /api/datasets/{dataset_id}
+- GET /api/datasets/{dataset_id}/schema
+- GET /api/datasets/{dataset_id}/preview
+
+3. Analysis Session APIs
+- POST /api/analysis-sessions
+- GET /api/analysis-sessions
+- GET /api/analysis-sessions/{session_id}
+- GET /api/analysis-sessions/{session_id}/messages
+
+4. Agent API
+- POST /api/agent/query
+
+5. Report APIs
+- POST /api/reports
+- GET /api/reports
+- GET /api/reports/{report_id}
+
+6. Health API
+- GET /api/health
+
+九、安全与合规
+
+1. 文件安全
+- 限制文件类型
+- 限制文件大小
+- 检查空文件
+- 清理文件名
+
+2. 数据安全
+- 自动识别敏感字段
+- 给字段标记 sensitivity_tag
+- 不直接暴露 PII 明细
+- 允许聚合级分析
+
+3. 查询安全
+- 拦截请求客户姓名、邮箱、手机号、信用分等明细数据的问题
+- 对敏感请求返回拒绝说明
+- 提供安全替代分析，例如按地区、分组、分层做聚合统计
+
+4. 回答安全
+- 最终回答必须基于分析结果
+- 数据不足时说明 limitation
+- 不编造不存在的字段、指标和结论
+
+十、P0 范围
+
+第一版必须完成：
+- 用户注册 / 登录
+- JWT 鉴权
+- 用户 Workspace
+- Excel / CSV 上传
+- PostgreSQL 数据集持久化
+- Schema inference
+- Data Catalog
+- Dataset Detail Page
+- Analysis Session
+- Chat History Persistence
+- LangGraph 基础 workflow
+- Intent Router
+- Task Planner
+- Tool Harness
+- Schema Inspection Tool
+- Python Analysis Tool
+- Chart Generation Tool
+- Safety Guardrail
+- Agent Chat UI
+- Tool Trace Logging
+- README
+- Architecture Diagram
+
+十一、P1 范围
+
+第二阶段建议完成：
+- Report Generation
+- Saved Reports
+- External Financial Data Mock Connector
+- Evaluation Test Cases
+- Basic Metrics Summary
+- 多 sheet Excel 更完善支持
+- 字段 description 编辑
+- Recent Sessions 页面优化
+
+十二、P2 / Future Work
+
+暂不纳入第一版：
+- Redis cache
+- 真实 Wind API
+- 完整 MCP server / client
+- 真实外部 PostgreSQL 数据库连接配置
+- 复杂 SQL Agent
+- 多租户组织权限
+- RBAC
+- S3 / OSS 对象存储
+- Kubernetes
+- 高并发压测
+- 复杂 BI dashboard builder
+
+十三、推荐技术栈
+
+Frontend:
+- React
+- Tailwind CSS
+- ECharts 或 Plotly
+
+Backend:
+- FastAPI
+- Pydantic
+- SQLAlchemy
+- Alembic
+
+Database:
+- PostgreSQL
+
+Agent:
+- LangGraph
+- LLM API
+- 自定义 Tool Harness
+
+Data Processing:
+- Pandas
+- OpenPyXL
+
+Auth:
+- JWT
+- Password hashing
+
+Storage:
+- 本地文件存储第一版
+- 后续可扩展到对象存储
+
+十四、Demo 用户路径
+
+1. 用户登录平台
+2. 进入 Workspace
+3. 上传企业 / 金融 Excel 或 CSV
+4. 系统解析文件并生成 Data Catalog
+5. 用户查看字段信息和数据预览
+6. 用户点击 Analyze this dataset
+7. 用户提问：Why did revenue drop in Q4?
+8. Agent 加载数据集 schema 和历史上下文
+9. Agent 识别意图为 root_cause_analysis
+10. Agent 进行安全检查
+11. Agent 生成分析计划
+12. Tool Harness 调用 Python Analysis Tool
+13. 系统生成分析表格和图表
+14. Agent 生成最终业务洞察
+15. 系统保存聊天记录、结构化结果和工具调用日志
+16. 用户继续追问：What about by region?
+17. Agent 从 PostgreSQL 读取历史会话上下文继续分析
+18. 用户请求生成 executive summary
+19. 系统生成并保存报告
