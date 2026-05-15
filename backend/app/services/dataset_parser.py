@@ -54,14 +54,14 @@ def parse_dataset_preview(
         if file_type == "csv":
             dataframe = pd.read_csv(path, nrows=limit)
         elif file_type in {"xlsx", "xls"}:
-            excel_file = pd.ExcelFile(path)
-            if not excel_file.sheet_names:
-                raise DatasetParseError("Excel file does not contain any sheets")
-            dataframe = pd.read_excel(
-                excel_file,
-                sheet_name=excel_file.sheet_names[0],
-                nrows=limit,
-            )
+            with pd.ExcelFile(path) as excel_file:
+                if not excel_file.sheet_names:
+                    raise DatasetParseError("Excel file does not contain any sheets")
+                dataframe = pd.read_excel(
+                    excel_file,
+                    sheet_name=excel_file.sheet_names[0],
+                    nrows=limit,
+                )
         else:
             raise DatasetParseError("Unsupported file type")
     except DatasetParseError:

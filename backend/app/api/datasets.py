@@ -18,7 +18,8 @@ from app.services.data_catalog_service import (
     generate_dataset_catalog,
     get_dataset_schema_rows,
 )
-from app.services.dataset_parser import DatasetParseError, parse_dataset_preview
+from app.services.dataset_parser import DatasetParseError
+from app.services.dataset_preview_service import load_head_preview
 from app.services.dataset_service import (
     create_dataset,
     delete_user_dataset,
@@ -142,20 +143,15 @@ def read_dataset(
             detail="Dataset not found",
         )
 
-    try:
-        preview_head = parse_dataset_preview(
-            dataset.storage_uri or dataset.file_path,
-            dataset.file_type,
-            limit=5,
-        )
-    except DatasetParseError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=str(exc),
-        ) from exc
+    schema_rows = _get_or_generate_schema_rows(db, dataset)
+    preview = _get_head_preview(dataset.storage_uri or dataset.file_path, dataset.file_type)
 
     dataset_data = DatasetRead.model_validate(dataset).model_dump()
-    return DatasetDetail(**dataset_data, preview_head=preview_head)
+    return DatasetDetail(
+        **dataset_data,
+        schema=schema_rows,
+        **preview,
+    )
 
 
 @router.get("/{dataset_id}/schema", response_model=list[DatasetSchemaRead])
@@ -171,6 +167,25 @@ def read_dataset_schema(
             detail="Dataset not found",
         )
 
+    return _get_or_generate_schema_rows(db, dataset)
+
+
+@router.delete("/{dataset_id}", response_model=DatasetDeleteResponse)
+def delete_dataset(
+    dataset_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> DatasetDeleteResponse:
+    deleted = delete_user_dataset(db, current_user.id, dataset_id)
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Dataset not found",
+        )
+    return DatasetDeleteResponse(message="Dataset deleted successfully")
+
+
+def _get_or_generate_schema_rows(db: Session, dataset) -> list[DatasetSchemaRead]:
     schema_rows = get_dataset_schema_rows(db, dataset.id)
     if schema_rows:
         return schema_rows
@@ -199,16 +214,11 @@ def read_dataset_schema(
     return get_dataset_schema_rows(db, dataset.id)
 
 
-@router.delete("/{dataset_id}", response_model=DatasetDeleteResponse)
-def delete_dataset(
-    dataset_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-) -> DatasetDeleteResponse:
-    deleted = delete_user_dataset(db, current_user.id, dataset_id)
-    if not deleted:
+def _get_head_preview(file_path: str, file_type: str) -> dict[str, object]:
+    try:
+        return load_head_preview(file_path, file_type, limit=5)
+    except DatasetParseError as exc:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Dataset not found",
-        )
-    return DatasetDeleteResponse(message="Dataset deleted successfully")
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(exc),
+        ) from exc

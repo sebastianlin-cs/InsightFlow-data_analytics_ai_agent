@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class DatasetRead(BaseModel):
@@ -27,10 +27,6 @@ class DatasetRead(BaseModel):
 
 class DatasetListItem(DatasetRead):
     pass
-
-
-class DatasetDetail(DatasetRead):
-    preview_head: list[dict[str, Any]]
 
 
 class DatasetSchemaRead(BaseModel):
@@ -60,6 +56,15 @@ class DatasetSchemaRead(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class DatasetDetail(DatasetRead):
+    schema_: list[DatasetSchemaRead] = Field(alias="schema", serialization_alias="schema")
+    preview_columns: list[str]
+    preview_rows: list[dict[str, Any]]
+    preview_row_count: int
+
+    model_config = {"from_attributes": True, "populate_by_name": True}
 
 
 class DatasetDeleteResponse(BaseModel):
