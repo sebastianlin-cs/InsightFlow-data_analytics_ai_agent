@@ -112,3 +112,46 @@ Auth test flow:
 7. Confirm the response returns the current user information.
 
 Swagger uses an HTTP Bearer security scheme, so paste only the token value from `access_token`; do not type `Bearer ` manually.
+
+## 11. Test Dataset Upload In Swagger
+
+Install new dependencies:
+
+```powershell
+python -m pip install -r requirements.txt
+```
+
+Generate the dataset migration:
+
+```powershell
+python -m alembic revision --autogenerate -m "add datasets table"
+```
+
+Run the migration:
+
+```powershell
+python -m alembic upgrade head
+```
+
+Start the backend:
+
+```powershell
+python -m uvicorn app.main:app --reload
+```
+
+Open Swagger:
+
+```text
+http://127.0.0.1:8000/docs
+```
+
+Dataset upload test flow:
+
+1. Call `POST /api/auth/register` to register a user.
+2. Call `POST /api/auth/login` to log in.
+3. Copy the returned `access_token`.
+4. Click `Authorize` in Swagger and paste the token value.
+5. Call `POST /api/datasets/upload` to upload a CSV or Excel file.
+6. Call `GET /api/datasets` to view the current user's dataset list.
+7. Call `GET /api/datasets/{dataset_id}` to view dataset details.
+8. Call `DELETE /api/datasets/{dataset_id}` to delete the dataset and its local file.
