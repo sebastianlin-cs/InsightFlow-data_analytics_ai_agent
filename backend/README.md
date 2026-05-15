@@ -48,13 +48,13 @@ Alembic is already configured in this backend. The configuration loads `.env`, i
 ## 6. Generate Migration
 
 ```powershell
-python -m alembic revision --autogenerate -m "create users table"
+alembic revision --autogenerate -m "create users table"
 ```
 
 ## 7. Run Migration
 
 ```powershell
-python -m alembic upgrade head
+alembic upgrade head
 ```
 
 ## 8. Start FastAPI
@@ -63,7 +63,7 @@ python -m alembic upgrade head
 python -m uvicorn app.main:app --reload
 ```
 
-## 9. Test Endpoints
+## 9. Test Health Endpoints
 
 Open these URLs in a browser or call them from PowerShell:
 
@@ -78,3 +78,37 @@ Browser URLs:
 http://127.0.0.1:8000/api/health
 http://127.0.0.1:8000/api/health/db
 ```
+
+## 10. Test Auth In Swagger
+
+Start the backend:
+
+```powershell
+python -m uvicorn app.main:app --reload
+```
+
+Open Swagger:
+
+```text
+http://127.0.0.1:8000/docs
+```
+
+Auth test flow:
+
+1. Call `POST /api/auth/register` to register a user.
+
+```json
+{
+  "email": "test@example.com",
+  "password": "123456"
+}
+```
+
+2. Call `POST /api/auth/login` with the same email and password.
+3. Copy the returned `access_token`.
+4. Click `Authorize` in the top-right corner of Swagger.
+5. Paste the token into the Bearer token field.
+6. Call `GET /api/auth/me`.
+7. Confirm the response returns the current user information.
+
+Swagger uses an HTTP Bearer security scheme, so paste only the token value from `access_token`; do not type `Bearer ` manually.
