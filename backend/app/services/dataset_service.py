@@ -11,10 +11,12 @@ def create_dataset(
     db: Session,
     user_id: int,
     original_filename: str,
+    stored_filename: str,
     file_type: str,
-    file_path: str,
+    file_size_bytes: int,
+    file_hash: str,
+    storage_uri: str,
     description: str | None,
-    metadata: dict[str, int],
 ) -> Dataset:
     name = Path(original_filename).stem or original_filename
     dataset = Dataset(
@@ -22,13 +24,47 @@ def create_dataset(
         name=name,
         description=description,
         original_filename=original_filename,
+        stored_filename=stored_filename,
         file_type=file_type,
-        file_path=file_path,
-        status="parsed",
-        row_count=metadata["row_count"],
-        column_count=metadata["column_count"],
-        sheet_count=metadata["sheet_count"],
+        file_size_bytes=file_size_bytes,
+        file_hash=file_hash,
+        storage_backend="local",
+        storage_uri=storage_uri,
+        file_path=storage_uri,
+        status="uploaded",
     )
+    db.add(dataset)
+    db.commit()
+    db.refresh(dataset)
+    return dataset
+
+
+def get_user_dataset_by_hash(db: Session, user_id: int, file_hash: str) -> Dataset | None:
+    return db.scalar(
+        select(Dataset).where(
+            Dataset.user_id == user_id,
+            Dataset.file_hash == file_hash,
+        )
+    )
+
+
+def mark_dataset_ready(
+    db: Session,
+    dataset: Dataset,
+    metadata: dict[str, int],
+) -> Dataset:
+    dataset.row_count = metadata["row_count"]
+    dataset.column_count = metadata["column_count"]
+    dataset.sheet_count = metadata["sheet_count"]
+    dataset.status = "ready"
+    db.add(dataset)
+    db.commit()
+    db.refresh(dataset)
+    return dataset
+
+
+def mark_dataset_failed(db: Session, dataset: Dataset) -> Dataset:
+    dataset.status = "failed"
     db.add(dataset)
     db.commit()
     db.refresh(dataset)
@@ -63,7 +99,7 @@ def delete_user_dataset(db: Session, user_id: int, dataset_id: int) -> bool:
     if dataset is None:
         return False
 
-    file_path = dataset.file_path
+    file_path = dataset.storage_uri or dataset.file_path
     db.delete(dataset)
     db.commit()
     delete_file_if_exists(file_path)
