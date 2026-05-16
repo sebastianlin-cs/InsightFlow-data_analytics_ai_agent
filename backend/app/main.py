@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.analysis_sessions import router as analysis_sessions_router
+from app.api.agent import router as agent_router
 from app.api.auth import router as auth_router
 from app.api.datasets import router as datasets_router
 from app.api.health import router as health_router
@@ -25,3 +26,4 @@ app.include_router(
     prefix="/api/analysis-sessions",
     tags=["analysis-sessions"],
 )
+app.include_router(agent_router, prefix="/api/agent", tags=["agent"])
