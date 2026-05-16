@@ -24,3 +24,8 @@ class User(Base):
         back_populates="user",
         cascade="all, delete-orphan",
     )
+    analysis_sessions: Mapped[list["AnalysisSession"]] = relationship(
+        "AnalysisSession",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )

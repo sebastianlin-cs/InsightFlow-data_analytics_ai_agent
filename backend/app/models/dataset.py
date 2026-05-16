@@ -7,6 +7,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.core.database import Base
 
 if TYPE_CHECKING:
+    from app.models.analysis import AnalysisSession
     from app.models.user import User
 
 
@@ -43,6 +44,11 @@ class Dataset(Base):
     user: Mapped["User"] = relationship("User", back_populates="datasets")
     schemas: Mapped[list["DatasetSchema"]] = relationship(
         "DatasetSchema",
+        back_populates="dataset",
+        cascade="all, delete-orphan",
+    )
+    analysis_sessions: Mapped[list["AnalysisSession"]] = relationship(
+        "AnalysisSession",
         back_populates="dataset",
         cascade="all, delete-orphan",
     )
