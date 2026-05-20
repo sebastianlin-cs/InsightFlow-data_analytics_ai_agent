@@ -1,5 +1,8 @@
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.api.analysis_sessions import router as analysis_sessions_router
 from app.api.agent import router as agent_router
@@ -9,6 +12,10 @@ from app.api.health import router as health_router
 from app.core.config import settings
 
 app = FastAPI(title=settings.APP_NAME, version="0.1.0")
+
+charts_dir = Path(settings.UPLOAD_DIR) / "charts"
+charts_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/charts", StaticFiles(directory=str(charts_dir)), name="charts")
 
 app.add_middleware(
     CORSMiddleware,

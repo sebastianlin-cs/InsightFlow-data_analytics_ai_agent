@@ -19,5 +19,11 @@ class AgentQueryRequest(BaseModel):
 class AgentQueryResponse(BaseModel):
     session_id: int
     dataset_id: int
+    intent: str | None = None
     answer: str
+    analysis_plan: list[str] = Field(default_factory=list)
+    tool_used: str | None = None
+    tool_result: dict[str, Any] = Field(default_factory=dict)
+    chart_url: str | None = None
+    follow_up_questions: list[str] = Field(default_factory=list)
     metadata: dict[str, Any]

@@ -5,7 +5,7 @@ from app.core.database import get_db
 from app.core.security import get_current_user
 from app.models.user import User
 from app.schemas.agent import AgentQueryRequest, AgentQueryResponse
-from app.services.agent_service import AgentDatasetNotFoundError, run_minimal_agent_query
+from app.services.agent_service import AgentDatasetNotFoundError, run_langgraph_pandas_agent_query
 from app.services.analysis_session_service import AnalysisSessionNotFoundError
 
 router = APIRouter()
@@ -18,7 +18,7 @@ def query_agent(
     current_user: User = Depends(get_current_user),
 ) -> AgentQueryResponse:
     try:
-        return run_minimal_agent_query(
+        return run_langgraph_pandas_agent_query(
             db=db,
             current_user=current_user,
             session_id=request.session_id,

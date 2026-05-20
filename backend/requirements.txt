@@ -13,3 +13,5 @@ python-multipart
 pandas
 openpyxl
 xlrd
+langgraph
+matplotlib
