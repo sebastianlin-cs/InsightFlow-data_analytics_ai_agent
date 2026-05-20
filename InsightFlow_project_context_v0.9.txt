@@ -1,0 +1,577 @@
+InsightFlow 项目进度 Context（截至 v0.9 完成）
+
+项目名称：
+InsightFlow
+
+项目路径：
+D:\Emory_MSCS\DAgent\InsightFlow
+
+GitHub repo：
+https://github.com/sebastianlin-cs/InsightFlow-data_analytics_ai_agent
+
+
+一、项目定位
+
+InsightFlow 是一个数据分析 AI Agent 平台。
+
+用户可以：
+1. 注册 / 登录
+2. 上传 CSV / Excel 数据集
+3. 系统将数据集作为云端可复用的数据资产持久化保存
+4. 系统生成 Data Catalog / Schema Context
+5. 用户基于某个 dataset 创建 analysis session
+6. 用户通过 Agent Chat 向数据集提问
+7. Agent 基于 dataset metadata、catalog、session messages 进行分析和回答
+
+项目核心目标不是普通 CRUD，而是一个具备工程化结构的数据分析 AI Agent 平台。
+
+当前 demo scope：
+1. 原始 CSV / Excel 文件存储在云服务器本地磁盘 / backend/storage/
+2. PostgreSQL 保存用户、dataset metadata、Data Catalog、session、messages、Agent response context
+3. 暂时不接 OSS / S3 / COS
+4. 暂时不把用户上传的数据逐行导入 PostgreSQL
+5. 暂时不动态创建 SQL table
+6. 后续 Agent 分析时根据 dataset_id 找到 storage_uri 和 Data Catalog
+
+核心架构原则：
+PostgreSQL 是控制平面和上下文层；
+本地文件存储是数据平面；
+dataset_id 是连接用户、原始数据、Data Catalog、session、messages、Agent workflow 的核心主键。
+
+
+二、技术栈
+
+Backend:
+- FastAPI
+- PostgreSQL
+- SQLAlchemy
+- Alembic
+- JWT Auth
+- Pandas
+- OpenPyXL
+
+Storage:
+- 当前 demo：backend/storage/datasets/user_{user_id}/
+- 未来可扩展对象存储，但当前版本只做 local storage
+
+Frontend:
+- React
+- Vite
+- TypeScript
+- Tailwind CSS
+- React Router
+
+Agent:
+- 当前 v0.8 已有 Minimal Agent Query API
+- 当前 v0.9 已有前端 Agent Chat 页面接入该 API
+- 未来会设计 LangGraph Agent Framework
+- 当前还没实现真正 Pandas analysis tool / chart generation / tool harness
+
+
+三、已完成版本
+
+v0.2 Backend Skeleton 已完成
+
+完成内容：
+- FastAPI 后端骨架
+- PostgreSQL Docker 跑通
+- .env 管理数据库连接
+- SQLAlchemy 配置完成
+- Alembic 配置完成
+- 最小 User model
+- Health API
+
+已有接口：
+- GET /api/health
+- GET /api/health/db
+
+
+v0.3 Auth 已完成
+
+完成内容：
+- 用户注册
+- 用户登录
+- JWT access token
+- current_user dependency
+- 用户身份识别
+
+已有接口：
+- POST /api/auth/register
+- POST /api/auth/login
+- GET /api/auth/me
+
+Auth 的作用：
+为 dataset、session、message、report、agent query 做用户隔离。
+
+
+v0.4 Dataset Upload Backend 已完成
+
+完成内容：
+- 用户登录后可以上传 CSV / Excel
+- 后端保存原始文件
+- 创建 datasets 表记录
+- dataset 绑定 current_user.id
+- 用户只能访问自己的 dataset
+- 支持基础 metadata：
+  - row_count
+  - column_count
+  - sheet_count
+  - file_type
+
+已有接口：
+- POST /api/datasets/upload
+- GET /api/datasets
+- GET /api/datasets/{dataset_id}
+- DELETE /api/datasets/{dataset_id}
+
+
+v0.5 Local Persistent Dataset Asset + Agent-ready Data Catalog 已完成
+
+这是一个关键版本。
+
+项目设计从“上传文件”升级为：
+用户上传的数据集 = 云端可复用 Dataset Asset
+
+完成内容：
+- 原始 CSV / Excel 文件持久化存在本地 storage
+- datasets 表增强为数据资产注册表
+- 新增 file_hash
+- 新增 storage_backend
+- 新增 storage_uri
+- 支持同一用户重复上传相同 file_hash 时返回已有 dataset
+- 新增 dataset_schemas 表
+- 上传成功后自动生成 Agent-ready Data Catalog
+
+当前存储原则：
+- 原始数据文件：backend/storage/datasets/user_{user_id}/
+- 数据 metadata / catalog：PostgreSQL
+- 不把用户上传表的每一行导入 PostgreSQL
+- 不动态创建用户数据表
+
+datasets 表大致字段：
+- id
+- user_id
+- name
+- description
+- original_filename
+- stored_filename
+- file_type
+- file_size_bytes
+- file_hash
+- storage_backend
+- storage_uri
+- row_count
+- column_count
+- sheet_count
+- status
+- created_at
+- updated_at
+
+dataset_schemas 表大致字段：
+- id
+- dataset_id
+- sheet_name
+- column_index
+- column_name
+- normalized_column_name
+- raw_data_type
+- semantic_type
+- nullable
+- missing_count
+- missing_rate
+- unique_count
+- unique_ratio
+- sample_values_json
+- min_value
+- max_value
+- sensitivity_tag
+- is_measure
+- is_dimension
+- is_time_column
+- is_identifier
+- description
+- created_at
+- updated_at
+
+Data Catalog 的作用：
+- 为后续 Agent 提供 schema grounding
+- 帮助 Agent 理解哪些字段是 measure / dimension / time column / identifier / sensitive field
+- 帮助后续 safety check、planning、tool calling、chart generation
+
+已有接口：
+- GET /api/datasets/{dataset_id}/schema
+
+
+v0.6 Flat Dataset Detail with Head5 Preview 已完成
+
+完成内容：
+- GET /api/datasets/{dataset_id} 变成扁平 dataset detail 聚合接口
+- 返回 dataset metadata
+- 返回 schema/catalog
+- 返回 head5 preview
+
+设计决策：
+- 暂时不单独做 GET /api/datasets/{id}/preview
+- head5 preview 直接放进 dataset detail
+- preview 只是轻量展示，不是完整数据浏览器
+- 不把 preview rows 存入 PostgreSQL
+
+GET /api/datasets/{id} 当前大致返回：
+{
+  "id": 1,
+  "name": "sales_2024",
+  "description": null,
+  "original_filename": "sales_2024.csv",
+  "stored_filename": "...",
+  "file_type": "csv",
+  "file_size_bytes": 12345,
+  "file_hash": "...",
+  "storage_backend": "local",
+  "storage_uri": "local://...",
+  "row_count": 5000,
+  "column_count": 8,
+  "sheet_count": 1,
+  "status": "ready",
+  "created_at": "...",
+  "updated_at": "...",
+  "schema": [],
+  "preview_columns": [],
+  "preview_rows": [],
+  "preview_row_count": 5
+}
+
+
+v0.7 Analysis Session Backend 已完成
+
+完成内容：
+- 新增 analysis_sessions 表
+- 新增 analysis_messages 表
+- 用户可以基于 dataset 创建分析会话
+- session 绑定 user_id 和 dataset_id
+- messages 绑定 session_id
+- 支持消息持久化
+- 为未来 Agent 多轮对话提供上下文容器
+
+核心关系：
+- analysis_sessions.id 就是 session_id
+- analysis_messages.session_id → analysis_sessions.id
+- analysis_sessions.dataset_id → datasets.id
+- analysis_sessions.user_id → users.id
+
+analysis_sessions 字段大致为：
+- id
+- user_id
+- dataset_id
+- title
+- current_topic
+- current_intent
+- current_filters_json
+- last_result_summary_json
+- created_at
+- updated_at
+
+analysis_messages 字段大致为：
+- id
+- session_id
+- role
+- content
+- structured_result_json
+- created_at
+
+已有接口：
+- POST /api/analysis-sessions
+- GET /api/analysis-sessions
+- GET /api/analysis-sessions/{session_id}
+- GET /api/analysis-sessions/{session_id}/messages
+- POST /api/analysis-sessions/{session_id}/messages
+
+Session 的含义：
+用户围绕某个 dataset 开启的一次分析对话。
+一个 dataset 可以有多个 sessions。
+一个 session 可以有多条 messages。
+
+
+v0.8 Minimal Agent Query API 已完成
+
+完成内容：
+- 新增 POST /api/agent/query
+- 打通最小 Agent 后端闭环
+- 当前不做真正 Pandas 分析
+- 当前不调用 LLM
+- 当前不做 chart
+- 当前不做 tool harness
+
+v0.8 目标：
+验证 Agent 请求可以：
+1. 接收 query
+2. 根据 session_id 找到 session
+3. 根据 session.dataset_id 找到 dataset
+4. 加载 dataset metadata
+5. 加载 dataset_schemas / Data Catalog
+6. 加载 recent messages
+7. 生成 rule-based basic response
+8. 保存 user message
+9. 保存 assistant message
+10. 返回 structured response
+
+新增或已有文件大致包括：
+- backend/app/api/agent.py
+- backend/app/schemas/agent.py
+- backend/app/services/agent_service.py
+- backend/app/agent/state.py
+
+POST /api/agent/query request：
+{
+  "session_id": 1,
+  "query": "What columns are in this dataset?"
+}
+
+Response：
+{
+  "session_id": 1,
+  "dataset_id": 12,
+  "answer": "This dataset has 8 columns. Measures include revenue and profit...",
+  "metadata": {
+    "mode": "minimal_agent",
+    "used_schema": true,
+    "used_recent_messages": true,
+    "message_saved": true
+  }
+}
+
+v0.8 当前 Agent 能力：
+- 如果 query 问 columns / schema / fields / catalog：
+  返回 Data Catalog summary
+- 如果 query 问 what can I analyze / summarize dataset：
+  返回基于 row_count / column_count / measures / dimensions / time columns 的能力总结
+- 否则：
+  返回 fallback，说明已加载 dataset context 和 session history，真正分析工具会在后续版本加入
+
+
+v0.9 Minimal React Frontend Foundation 已完成
+
+完成内容：
+- 新增 React + Vite + TypeScript + Tailwind 前端
+- 完成基础前端用户路径
+- 前端已接入后端 API
+- 支持登录 / 注册
+- 支持 JWT token localStorage
+- 支持 Workspace dataset list
+- 支持 dataset upload
+- 支持 dataset detail 页面
+- 支持展示 metadata
+- 支持展示 Data Catalog / SchemaTable
+- 支持展示 head5 preview / PreviewTable
+- 支持创建 analysis session
+- 支持 Agent Chat 页面
+- 支持调用 POST /api/agent/query
+- 支持展示 session messages
+- 支持刷新后 messages 仍然存在
+
+v0.9 前端目标路径已完成：
+Register / Login
+↓
+Workspace dataset list
+↓
+Upload dataset
+↓
+Open dataset detail
+↓
+View metadata + schema/catalog + head5 preview
+↓
+Create analysis session
+↓
+Enter Agent Chat page
+↓
+Call POST /api/agent/query
+↓
+Show answer
+↓
+Messages persist after refresh
+
+v0.9 技术栈：
+- React
+- Vite
+- TypeScript
+- Tailwind CSS
+- React Router
+
+frontend 目录结构大致为：
+frontend/
+  src/
+    api/
+      client.ts
+      auth.ts
+      datasets.ts
+      sessions.ts
+      agent.ts
+
+    pages/
+      LoginPage.tsx
+      RegisterPage.tsx
+      WorkspacePage.tsx
+      DatasetDetailPage.tsx
+      AgentChatPage.tsx
+
+    components/
+      Layout.tsx
+      DatasetUpload.tsx
+      DatasetTable.tsx
+      SchemaTable.tsx
+      PreviewTable.tsx
+      MessageList.tsx
+      ChatInput.tsx
+
+    types/
+      auth.ts
+      dataset.ts
+      session.ts
+      agent.ts
+
+    App.tsx
+    main.tsx
+
+v0.9 当前不做：
+- 不做复杂 UI
+- 不做 Redux / Zustand
+- 不做图表
+- 不做 report UI
+- 不做复杂数据表筛选排序
+- 不做 refresh token
+- 不做复杂 dashboard
+
+
+四、当前 Git 状态
+
+当前 main 已经包含到 v0.9，并且 v0.9 已完成。
+
+此前 v0.8 最新提交链大致为：
+- bca2eb9 add minimal agent query api        # v0.8
+- 0d51d76 add analysis session backend       # v0.7
+- dad4b57 add flat dataset detail with head preview
+- 37e7999 add local persistent dataset catalog
+- 137cf9a add dataset upload backend
+- 26e2208 add JWT auth system
+- a69ef4c add FastAPI backend skeleton
+- 843ba53 init InsightFlow project
+
+v0.9 完成后应已经有类似 commit：
+- add minimal react frontend foundation
+
+如果新 session 需要继续协助，请先确认：
+git branch
+git status
+git log --oneline -10
+
+
+五、当前已具备的完整 MVP 闭环
+
+现在项目已经具备：
+Auth
+↓
+Dataset Upload
+↓
+Local Persistent Dataset Asset
+↓
+Data Catalog
+↓
+Flat Dataset Detail + Head5 Preview
+↓
+Analysis Session
+↓
+Analysis Messages
+↓
+Minimal Agent Query API
+↓
+React Frontend
+↓
+可点击 Demo 用户路径
+
+也就是说，目前 InsightFlow 已经不是纯后端接口集合，而是一个有完整基础用户路径的 AI 数据分析平台 MVP。
+
+
+六、当前架构原则
+
+后续继续遵守：
+
+1. FastAPI 负责外部 API、鉴权、权限校验、调用 service / agent workflow
+2. PostgreSQL 负责长期持久化 users / datasets / catalog / sessions / messages / traces / reports
+3. Local storage 负责保存原始 CSV / Excel 文件
+4. LangGraph 负责未来 Agent workflow
+5. 不要把分析逻辑堆进 FastAPI route
+6. 不要为每种分析任务暴露一堆外部 API
+7. 核心 Agent API 应该保持 POST /api/agent/query
+
+不要设计这些外部分析 API：
+- /api/analyze/trend
+- /api/analyze/groupby
+- /api/chart/bar
+
+这些未来应该是内部 tools / LangGraph nodes，而不是外部 API。
+
+
+七、后续 Agent 设计计划
+
+v0.9 完成后，计划暂停继续堆功能，开始单独研究别人数据分析 Agent 框架，然后设计 InsightFlow 自己的 Agent framework。
+
+后续真正 Agent 版本需要设计：
+
+1. AgentState
+2. LangGraph node graph
+3. load_context node
+4. classify_intent node
+5. safety_check node
+6. plan_task node
+7. execute_tools node
+8. generate_response node
+9. save_result node
+10. Tool Harness
+11. Python Analysis Tool
+12. Schema Inspection Tool
+13. Chart Generation Tool
+14. Safety Tool
+15. Tool Trace Logging
+
+未来 AgentState 大致可能包含：
+- user_id
+- session_id
+- dataset_id
+- user_query
+- dataset_metadata
+- dataset_schema
+- recent_messages
+- intent
+- analysis_plan
+- selected_columns
+- tool_results
+- table_result
+- chart_spec
+- final_answer
+- errors
+
+未来 Agent API 仍然是：
+POST /api/agent/query
+
+但是 v0.8 的 minimal rule-based logic 会被 LangGraph workflow 替换。
+
+
+八、建议下一步版本方向
+
+当前 v0.9 已经完成，接下来建议进入 Agent 框架设计阶段。
+
+推荐下一步不是继续堆前端，而是：
+
+v1.0 Agent Framework Design / LangGraph Scaffold
+
+重点要先确定：
+- AgentState 结构
+- LangGraph 节点拆分
+- Tool Harness 输入输出规范
+- Python Analysis Tool 安全边界
+- Chart Spec 格式
+- Tool Trace 如何落库
+- Agent API request / response 是否需要扩展
+- 如何从 dataset_schemas 做 schema grounding
+- 如何从 analysis_messages 做多轮上下文
+
+建议先不要立刻写复杂 Agent 代码，先设计框架，再让 Codex 实现。
