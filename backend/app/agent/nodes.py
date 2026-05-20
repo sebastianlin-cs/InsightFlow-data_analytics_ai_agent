@@ -4,6 +4,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.agent.llm_client import get_llm_client
 from app.agent.planner import build_rule_based_plan
 from app.agent.router import route_intent
 from app.agent.state import AgentState
@@ -14,6 +15,7 @@ from app.agent.tools.dataframe_tools import (
     correlation_tool,
     profile_dataset_tool,
 )
+from app.agent.validators import validate_llm_plan
 from app.core.config import settings
 from app.models.analysis import AnalysisMessage
 from app.models.dataset import Dataset, DatasetSchema
@@ -51,6 +53,8 @@ def load_context_node(db: Session, current_user: User, state: AgentState) -> Age
             "dataset_path": dataset.file_path,
             "dataset_file_type": dataset.file_type,
             "recent_messages": [_message_metadata(message) for message in recent_messages],
+            "llm_enabled": settings.LLM_ENABLED,
+            "llm_provider": settings.LLM_PROVIDER,
         }
     )
     return state
@@ -63,13 +67,29 @@ def intent_router_node(state: AgentState) -> AgentState:
 
 
 def planning_node(state: AgentState) -> AgentState:
-    """Build a structured plan and tool input without calling an LLM."""
+    """Build a structured plan with optional LLM planning and rule-based fallback."""
+    if settings.LLM_ENABLED:
+        try:
+            raw_plan = get_llm_client(settings).generate_plan(
+                query=state["user_query"],
+                schema=state.get("dataset_schema", []),
+                recent_messages=state.get("recent_messages", []),
+                intent=state["intent"],
+            )
+            plan = validate_llm_plan(raw_plan, state.get("dataset_schema", []))
+            state.update(plan)
+            state["planner_source"] = "llm"
+            return state
+        except Exception as exc:
+            _set_fallback_reason(state, str(exc))
+
     plan = build_rule_based_plan(
         query=state["user_query"],
         intent=state["intent"],
         dataset_schema=state.get("dataset_schema", []),
     )
     state.update(plan)
+    state["planner_source"] = "rule_based"
     return state
 
 
@@ -217,7 +237,33 @@ def unsupported_handler(state: AgentState) -> AgentState:
 
 
 def response_generation_node(state: AgentState) -> AgentState:
-    """Generate a structured template answer from the tool result."""
+    """Generate an answer with optional LLM rewriting and template fallback."""
+    if settings.LLM_ENABLED:
+        try:
+            answer = get_llm_client(settings).generate_response(
+                query=state["user_query"],
+                schema=state.get("dataset_schema", []),
+                analysis_plan=state.get("analysis_plan", []),
+                tool_result=state.get("tool_result", {}),
+                chart_url=state.get("chart_url"),
+                error=state.get("error"),
+                follow_up_questions=state.get("follow_up_questions"),
+            )
+            state["final_answer"] = _coerce_llm_answer(answer)
+            state["response_source"] = "llm"
+            state["metadata"] = _response_metadata(state)
+            return state
+        except Exception as exc:
+            _set_fallback_reason(state, str(exc))
+
+    _apply_template_response(state)
+    state["response_source"] = "template"
+    state["metadata"] = _response_metadata(state)
+    return state
+
+
+def _apply_template_response(state: AgentState) -> None:
+    """Populate final_answer using the deterministic v1 template responses."""
     intent = state.get("intent", "unsupported")
     result = state.get("tool_result", {})
     if intent == "schema_question":
@@ -238,18 +284,6 @@ def response_generation_node(state: AgentState) -> AgentState:
             "basic pandas statistics, grouped aggregations, correlations, and simple charts."
         )
 
-    state["metadata"] = {
-        "mode": "langgraph_pandas_agent_v1",
-        "used_schema": bool(state.get("dataset_schema")),
-        "used_recent_messages": bool(state.get("recent_messages")),
-        "message_saved": False,
-        "intent": intent,
-        "selected_tool": state.get("selected_tool"),
-        "chart_url": state.get("chart_url"),
-        "error": state.get("error"),
-    }
-    return state
-
 
 def save_session_node(db: Session, current_user: User, state: AgentState) -> AgentState:
     """Save the user message and assistant answer to the analysis session."""
@@ -267,6 +301,11 @@ def save_session_node(db: Session, current_user: User, state: AgentState) -> Age
         "selected_tool": state.get("selected_tool"),
         "chart_url": state.get("chart_url"),
         "error": state.get("error"),
+        "llm_enabled": state.get("llm_enabled"),
+        "llm_provider": state.get("llm_provider"),
+        "planner_source": state.get("planner_source"),
+        "response_source": state.get("response_source"),
+        "fallback_reason": state.get("fallback_reason"),
     }
     create_session_message(
         db=db,
@@ -349,6 +388,43 @@ def _copy_tool_error(state: AgentState) -> None:
     error = state.get("tool_result", {}).get("error")
     if error:
         state["error"] = error.get("message") if isinstance(error, dict) else str(error)
+
+
+def _set_fallback_reason(state: AgentState, reason: str) -> None:
+    if not state.get("fallback_reason"):
+        state["fallback_reason"] = reason
+
+
+def _response_metadata(state: AgentState) -> dict[str, Any]:
+    return {
+        "mode": "langgraph_pandas_agent_v1_1",
+        "used_schema": bool(state.get("dataset_schema")),
+        "used_recent_messages": bool(state.get("recent_messages")),
+        "message_saved": False,
+        "intent": state.get("intent"),
+        "selected_tool": state.get("selected_tool"),
+        "chart_url": state.get("chart_url"),
+        "error": state.get("error"),
+        "llm_enabled": bool(state.get("llm_enabled")),
+        "llm_provider": state.get("llm_provider"),
+        "planner_source": state.get("planner_source"),
+        "response_source": state.get("response_source"),
+        "fallback_reason": state.get("fallback_reason"),
+    }
+
+
+def _coerce_llm_answer(answer: str | dict[str, Any]) -> str:
+    if isinstance(answer, str):
+        clean_answer = answer.strip()
+        if clean_answer:
+            return clean_answer
+        raise RuntimeError("LLM response was empty.")
+    if isinstance(answer, dict):
+        for key in ("answer", "content", "message"):
+            value = answer.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+    raise RuntimeError("LLM response must be a non-empty string or contain an answer field.")
 
 
 def _schema_answer(state: AgentState) -> str:

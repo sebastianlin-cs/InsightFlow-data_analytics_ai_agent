@@ -26,6 +26,11 @@ def run_langgraph_pandas_agent_query(
         "chart_path": None,
         "chart_url": None,
         "error": None,
+        "llm_enabled": False,
+        "llm_provider": "",
+        "planner_source": "rule_based",
+        "response_source": "template",
+        "fallback_reason": None,
     }
     final_state = run_agent_graph(db, current_user, state)
     metadata = final_state.get("metadata", {})

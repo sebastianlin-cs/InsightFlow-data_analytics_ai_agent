@@ -10,6 +10,12 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 1440
     UPLOAD_DIR: str = "storage"
     MAX_UPLOAD_SIZE_MB: int = 20
+    LLM_ENABLED: bool = False
+    LLM_PROVIDER: str = "openai_compatible"
+    LLM_API_KEY: str = ""
+    LLM_MODEL: str = ""
+    LLM_BASE_URL: str = ""
+    LLM_TIMEOUT_SECONDS: int = 30
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 

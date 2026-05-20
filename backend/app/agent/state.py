@@ -33,4 +33,9 @@ class AgentState(TypedDict, total=False):
     final_answer: str
     follow_up_questions: list[str]
     error: str | None
+    llm_enabled: bool
+    llm_provider: str
+    planner_source: str
+    response_source: str
+    fallback_reason: str | None
     metadata: dict[str, Any]
