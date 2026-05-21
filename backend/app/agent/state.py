@@ -38,4 +38,5 @@ class AgentState(TypedDict, total=False):
     planner_source: str
     response_source: str
     fallback_reason: str | None
+    agent_trace: dict[str, Any]
     metadata: dict[str, Any]

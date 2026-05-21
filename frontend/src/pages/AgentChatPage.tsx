@@ -38,8 +38,33 @@ export function AgentChatPage() {
     setSending(true);
     setError(null);
     try {
-      await queryAgent(numericSessionId, message);
-      setMessages(await listSessionMessages(numericSessionId));
+      const now = new Date().toISOString();
+      const response = await queryAgent(numericSessionId, message);
+      setMessages((current) => [
+        ...current,
+        {
+          id: -Date.now(),
+          session_id: numericSessionId,
+          role: "user",
+          content: message,
+          structured_result_json: null,
+          created_at: now,
+        },
+        {
+          id: -Date.now() - 1,
+          session_id: numericSessionId,
+          role: "assistant",
+          content: response.answer,
+          structured_result_json: response.metadata ?? null,
+          created_at: new Date().toISOString(),
+          agent_trace: response.agent_trace,
+          analysis_plan: response.analysis_plan,
+          tool_used: response.tool_used,
+          tool_result: response.tool_result,
+          chart_url: response.chart_url,
+          follow_up_questions: response.follow_up_questions,
+        },
+      ]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Agent query failed");
     } finally {

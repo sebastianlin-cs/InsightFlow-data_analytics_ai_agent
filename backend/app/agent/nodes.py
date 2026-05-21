@@ -295,6 +295,8 @@ def save_session_node(db: Session, current_user: User, state: AgentState) -> Age
         content=state["user_query"],
         structured_result_json=None,
     )
+    agent_trace = build_agent_trace(state, include_saved_step=True)
+    state["agent_trace"] = agent_trace
     message_metadata = {
         "intent": state.get("intent"),
         "analysis_plan": state.get("analysis_plan"),
@@ -306,6 +308,7 @@ def save_session_node(db: Session, current_user: User, state: AgentState) -> Age
         "planner_source": state.get("planner_source"),
         "response_source": state.get("response_source"),
         "fallback_reason": state.get("fallback_reason"),
+        "agent_trace": agent_trace,
     }
     create_session_message(
         db=db,
@@ -316,6 +319,7 @@ def save_session_node(db: Session, current_user: User, state: AgentState) -> Age
         structured_result_json=message_metadata,
     )
     state["metadata"]["message_saved"] = True
+    state["agent_trace"] = agent_trace
     return state
 
 
@@ -410,6 +414,32 @@ def _response_metadata(state: AgentState) -> dict[str, Any]:
         "planner_source": state.get("planner_source"),
         "response_source": state.get("response_source"),
         "fallback_reason": state.get("fallback_reason"),
+    }
+
+
+def build_agent_trace(state: AgentState, *, include_saved_step: bool = False) -> dict[str, Any]:
+    """Build a compact observable trace for API responses and message metadata."""
+    steps = [
+        "Loaded dataset context",
+        "Classified user intent",
+        "Generated analysis plan",
+        "Validated required columns",
+        "Executed selected tool",
+        "Generated final response",
+    ]
+    if include_saved_step:
+        steps.append("Saved analysis message")
+    return {
+        "intent": state.get("intent"),
+        "planner_source": state.get("planner_source"),
+        "response_source": state.get("response_source"),
+        "selected_tool": state.get("selected_tool"),
+        "validated_columns": state.get("required_columns", []),
+        "chart_url": state.get("chart_url"),
+        "fallback_reason": state.get("fallback_reason"),
+        "llm_enabled": state.get("llm_enabled"),
+        "llm_provider": state.get("llm_provider"),
+        "steps": steps,
     }
 
 

@@ -1,7 +1,7 @@
 from sqlalchemy.orm import Session
 
 from app.agent.graph import run_agent_graph
-from app.agent.nodes import AgentDatasetNotFoundError
+from app.agent.nodes import AgentDatasetNotFoundError, build_agent_trace
 from app.agent.state import AgentState
 from app.models.user import User
 from app.schemas.agent import AgentQueryResponse
@@ -31,9 +31,14 @@ def run_langgraph_pandas_agent_query(
         "planner_source": "rule_based",
         "response_source": "template",
         "fallback_reason": None,
+        "agent_trace": {},
     }
     final_state = run_agent_graph(db, current_user, state)
     metadata = final_state.get("metadata", {})
+    agent_trace = final_state.get("agent_trace") or build_agent_trace(
+        final_state,
+        include_saved_step=bool(metadata.get("message_saved")),
+    )
 
     return AgentQueryResponse(
         session_id=final_state["session_id"],
@@ -45,6 +50,7 @@ def run_langgraph_pandas_agent_query(
         tool_result=final_state.get("tool_result", {}),
         chart_url=final_state.get("chart_url"),
         follow_up_questions=final_state.get("follow_up_questions", []),
+        agent_trace=agent_trace,
         metadata=metadata,
     )
 

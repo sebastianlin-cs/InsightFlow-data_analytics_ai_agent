@@ -1,4 +1,4 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 const TOKEN_KEY = "insightflow_access_token";
 
 export function getToken(): string | null {
@@ -30,11 +30,16 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   if (token) {
     headers.set("Authorization", `Bearer ${token}`);
   }
+  const requestBody: BodyInit | undefined = isFormData
+    ? (options.body as FormData)
+    : options.body !== undefined
+      ? JSON.stringify(options.body)
+      : undefined;
 
   const response = await fetch(`${API_BASE_URL}${path}`, {
     method: options.method ?? "GET",
     headers,
-    body: isFormData ? options.body : options.body !== undefined ? JSON.stringify(options.body) : undefined,
+    body: requestBody,
   });
 
   if (!response.ok) {
@@ -52,4 +57,11 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
     return undefined as T;
   }
   return response.json() as Promise<T>;
+}
+
+export function apiAssetUrl(path: string | null | undefined): string | null {
+  if (!path) return null;
+  if (path.startsWith("http://") || path.startsWith("https://")) return path;
+  if (path.startsWith("/")) return `${API_BASE_URL}${path}`;
+  return `${API_BASE_URL}/${path}`;
 }

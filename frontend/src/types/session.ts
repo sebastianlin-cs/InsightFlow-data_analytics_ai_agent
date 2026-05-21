@@ -1,3 +1,5 @@
+import type { AgentTrace } from "./agent";
+
 export type AnalysisSession = {
   id: number;
   user_id: number;
@@ -18,4 +20,10 @@ export type AnalysisMessage = {
   content: string;
   structured_result_json: Record<string, unknown> | unknown[] | null;
   created_at: string;
+  agent_trace?: AgentTrace;
+  analysis_plan?: string[];
+  tool_used?: string | null;
+  tool_result?: unknown;
+  chart_url?: string | null;
+  follow_up_questions?: string[];
 };
