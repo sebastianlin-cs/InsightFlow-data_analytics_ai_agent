@@ -24,8 +24,9 @@ workflow with optional LLM planning and response generation.
 
 The current agent keeps all data execution inside deterministic Python tools.
 LLM calls are optional and only used for structured planning and final response
-wording. If LLM configuration is disabled, missing, or invalid, the agent falls
-back to rule-based behavior.
+wording. Advanced single-dataset analysis can use controlled generated pandas
+code. If LLM configuration is disabled, missing, or invalid, the agent falls
+back to rule-based behavior for fixed-tool requests.
 
 ```mermaid
 flowchart TD
@@ -36,13 +37,18 @@ flowchart TD
     D -->|No| F[Rule-based Planner]
     E --> G[Plan Validation]
     F --> G[Plan Validation]
-    G --> H[Pandas / Chart Tool Execution]
-    H --> I{LLM Enabled?}
-    I -->|Yes| J[LLM Response Generator]
-    I -->|No| K[Template Response Generator]
-    J --> L[Save Analysis Message]
-    K --> L[Save Analysis Message]
-    L --> M[Frontend Agent Trace Display]
+    G --> H{Execution Mode}
+    H -->|fixed_tool| I[Pandas / Chart Tool Execution]
+    H -->|generated_code| J[Generate analyze(df)]
+    J --> K[AST Safety Validation]
+    K --> L[Timeout-limited Subprocess Runner]
+    L --> M{Retryable Error?}
+    M -->|Once| N[Debug Reentry and Repair]
+    N --> K
+    M -->|No| O[LLM / Template Response]
+    I --> O
+    O --> P[Save Analysis Message]
+    P --> Q[Frontend Agent Trace Display]
 ```
 
 ## Agent Version History
@@ -53,6 +59,7 @@ flowchart TD
 | v1.0 | Rule-based LangGraph/Pandas agent with deterministic tools |
 | v1.1 | Optional LLM planner and response generator with rule-based fallback |
 | v1.2 | Agent trace, frontend plan/tool/chart display, and architecture documentation |
+| v2.0 | Controlled Pandas code execution with AST safety checks, timeout-limited subprocess runner, structured outputs, agent trace, and one-time debug reentry |
 
 ## Current Agent Scope
 
@@ -64,17 +71,57 @@ flowchart TD
 - Chart generation
 - LLM-assisted planning
 - LLM-assisted response generation
+- Controlled generated pandas code for advanced single-dataset analysis
+- AST safety validation and timeout-limited subprocess execution
+- One-time debug reentry for retryable generated-code runtime errors
 - Rule-based fallback
 - Session persistence
+
+## v2.0 Controlled Pandas Code Execution
+
+For complex single-dataset questions that fixed tools cannot express, the agent
+can ask the LLM to generate one restricted function:
+
+```python
+def analyze(df):
+    ...
+```
+
+The dataframe `df` is already loaded by the backend. The generated function must
+return a JSON-serializable dictionary with:
+
+- `answer`
+- `tables`
+- `charts`
+- `metadata`
+
+Before execution, the code is parsed with Python `ast` and blocked if it uses
+forbidden imports, forbidden calls, forbidden attributes, invalid function
+signatures, or obvious infinite loops such as `while True`.
+
+Validated code is executed in a timeout-limited subprocess runner, not inside
+the FastAPI process. The runner captures stdout, stderr, status, tables, charts,
+metadata, error text, and execution time.
+
+If the first run fails with a retryable runtime error, the agent may ask the LLM
+to repair the code once. The repaired code must pass AST safety validation again
+and is executed once. There is no infinite repair loop.
+
+The current subprocess runner is a local controlled execution MVP and not a
+production-grade security sandbox.
 
 ## Out of Scope
 
 - No multi-agent orchestration yet
-- No sandbox code execution yet
-- No LLM-generated Python execution yet
+- No production-grade sandbox yet
+- No arbitrary Python execution
+- No network access from generated code
+- No package installation from generated code
+- No unrestricted LLM-generated Python execution
 - No SQL agent yet
 - No AutoML yet
 - No long-term vector memory yet
+- No more than one debug retry
 
 ## Local Development Notes
 

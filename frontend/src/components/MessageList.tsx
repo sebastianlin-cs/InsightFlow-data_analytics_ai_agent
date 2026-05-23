@@ -45,8 +45,10 @@ function AssistantResult({ data }: { data: RichAgentData }) {
   const hasTrace = Boolean(data.agent_trace);
   const hasFollowUps = data.follow_up_questions.length > 0;
   const hasToolResult = data.tool_result !== undefined && data.tool_result !== null;
+  const hasCodePreview = Boolean(data.generated_code_preview ?? data.agent_trace?.generated_code_preview);
+  const hasCodeResult = data.code_execution_result !== undefined && data.code_execution_result !== null;
 
-  if (!hasPlan && !hasTrace && !chartSrc && !hasToolResult && !hasFollowUps) return null;
+  if (!hasPlan && !hasTrace && !chartSrc && !hasToolResult && !hasFollowUps && !hasCodePreview && !hasCodeResult) return null;
 
   return (
     <div className="mt-4 space-y-3 border-t border-slate-100 pt-3">
@@ -71,6 +73,14 @@ function AssistantResult({ data }: { data: RichAgentData }) {
             <TraceItem label="Tool" value={data.agent_trace.selected_tool ?? data.tool_used} />
             <TraceItem label="Fallback" value={data.agent_trace.fallback_reason ?? "none"} />
             <TraceItem label="LLM" value={data.agent_trace.llm_enabled === undefined ? undefined : String(data.agent_trace.llm_enabled)} />
+            <TraceItem label="Execution" value={data.agent_trace.execution_mode ?? data.execution_mode} />
+            <TraceItem label="Safety" value={data.agent_trace.safety_check} />
+            <TraceItem label="Runner" value={data.agent_trace.runner} />
+            <TraceItem label="Status" value={data.agent_trace.execution_status} />
+            <TraceItem label="Time" value={formatExecutionTime(data.agent_trace.execution_time_ms)} />
+            <TraceItem label="Reentry" value={data.agent_trace.reentry_used === undefined ? undefined : String(data.agent_trace.reentry_used)} />
+            <TraceItem label="Retry" value={data.agent_trace.retry_count === undefined ? undefined : String(data.agent_trace.retry_count)} />
+            <TraceItem label="Max Retry" value={data.agent_trace.max_retries === undefined ? undefined : String(data.agent_trace.max_retries)} />
           </div>
           {data.agent_trace.steps && data.agent_trace.steps.length > 0 && (
             <ul className="mt-2 list-disc space-y-1 pl-5 text-xs text-slate-500">
@@ -99,6 +109,46 @@ function AssistantResult({ data }: { data: RichAgentData }) {
           </summary>
           <pre className="max-h-80 overflow-auto border-t border-slate-200 p-3 text-xs text-slate-700">
             {JSON.stringify(data.tool_result, null, 2)}
+          </pre>
+        </details>
+      )}
+
+      {hasCodePreview && (
+        <details className="rounded-md border border-slate-200 bg-slate-50">
+          <summary className="cursor-pointer px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
+            Generated Code Preview
+          </summary>
+          <pre className="max-h-80 overflow-auto border-t border-slate-200 p-3 text-xs text-slate-700">
+            {data.generated_code_preview ?? data.agent_trace?.generated_code_preview}
+          </pre>
+        </details>
+      )}
+
+      {hasCodeResult && (
+        <details className="rounded-md border border-slate-200 bg-slate-50">
+          <summary className="cursor-pointer px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
+            Code Execution Result
+          </summary>
+          <pre className="max-h-80 overflow-auto border-t border-slate-200 p-3 text-xs text-slate-700">
+            {JSON.stringify(data.code_execution_result, null, 2)}
+          </pre>
+        </details>
+      )}
+
+      {(data.agent_trace?.first_attempt || data.agent_trace?.repair_attempt) && (
+        <details className="rounded-md border border-slate-200 bg-slate-50">
+          <summary className="cursor-pointer px-3 py-2 text-xs font-semibold uppercase tracking-wide text-slate-600">
+            First / Repair Attempt
+          </summary>
+          <pre className="max-h-80 overflow-auto border-t border-slate-200 p-3 text-xs text-slate-700">
+            {JSON.stringify(
+              {
+                first_attempt: data.agent_trace.first_attempt,
+                repair_attempt: data.agent_trace.repair_attempt,
+              },
+              null,
+              2,
+            )}
           </pre>
         </details>
       )}
@@ -134,6 +184,9 @@ type RichAgentData = {
   tool_result?: unknown;
   chart_url?: string | null;
   follow_up_questions: string[];
+  execution_mode?: string | null;
+  code_execution_result?: unknown;
+  generated_code_preview?: string | null;
 };
 
 function getRichAgentData(message: AnalysisMessage): RichAgentData {
@@ -146,6 +199,10 @@ function getRichAgentData(message: AnalysisMessage): RichAgentData {
     tool_result: message.tool_result,
     chart_url: message.chart_url ?? getStringValue(structured.chart_url),
     follow_up_questions: message.follow_up_questions ?? getStringArray(structured.follow_up_questions),
+    execution_mode: message.execution_mode ?? getStringValue(structured.execution_mode),
+    code_execution_result: message.code_execution_result ?? structured.code_execution_result,
+    generated_code_preview:
+      message.generated_code_preview ?? getStringValue(structured.generated_code_preview),
   };
 }
 
@@ -163,4 +220,8 @@ function getStringValue(value: unknown): string | null {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function formatExecutionTime(value: number | null | undefined): string | undefined {
+  return typeof value === "number" ? `${value} ms` : undefined;
 }

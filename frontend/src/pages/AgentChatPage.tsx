@@ -34,12 +34,12 @@ export function AgentChatPage() {
     }
   }
 
-  async function handleSend(message: string) {
+  async function handleSend(message: string, maxRetries: number) {
     setSending(true);
     setError(null);
     try {
       const now = new Date().toISOString();
-      const response = await queryAgent(numericSessionId, message);
+      const response = await queryAgent(numericSessionId, message, maxRetries);
       setMessages((current) => [
         ...current,
         {
@@ -63,6 +63,9 @@ export function AgentChatPage() {
           tool_result: response.tool_result,
           chart_url: response.chart_url,
           follow_up_questions: response.follow_up_questions,
+          execution_mode: response.execution_mode,
+          code_execution_result: response.code_execution_result,
+          generated_code_preview: response.generated_code_preview,
         },
       ]);
     } catch (err) {

@@ -1,9 +1,13 @@
 import { apiRequest } from "./client";
 import type { AgentQueryResponse } from "../types/agent";
 
-export function queryAgent(sessionId: number, query: string): Promise<AgentQueryResponse> {
+export function queryAgent(
+  sessionId: number,
+  query: string,
+  maxRetries?: number,
+): Promise<AgentQueryResponse> {
   return apiRequest<AgentQueryResponse>("/api/agent/query", {
     method: "POST",
-    body: { session_id: sessionId, query },
+    body: { session_id: sessionId, query, max_retries: maxRetries },
   });
 }

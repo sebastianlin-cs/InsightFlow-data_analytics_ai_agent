@@ -23,6 +23,7 @@ def query_agent(
             current_user=current_user,
             session_id=request.session_id,
             query=request.query,
+            max_retries=request.max_retries,
         )
     except (AnalysisSessionNotFoundError, AgentDatasetNotFoundError) as exc:
         raise HTTPException(

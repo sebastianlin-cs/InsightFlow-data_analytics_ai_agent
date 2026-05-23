@@ -9,6 +9,7 @@ AgentIntent = Literal[
     "clarification",
     "unsupported",
 ]
+ExecutionMode = Literal["fixed_tool", "generated_code"]
 
 
 class AgentState(TypedDict, total=False):
@@ -39,4 +40,23 @@ class AgentState(TypedDict, total=False):
     response_source: str
     fallback_reason: str | None
     agent_trace: dict[str, Any]
+    execution_mode: ExecutionMode
+    generated_code: str | None
+    generated_code_preview: str | None
+    code_generation_result: dict[str, Any] | None
+    code_safety_result: dict[str, Any] | None
+    code_execution_result: dict[str, Any] | None
+    reentry_used: bool
+    retry_count: int
+    max_retries: int
+    first_execution_error: str | None
+    debug_generation_result: dict[str, Any] | None
+    debug_safety_result: dict[str, Any] | None
+    debug_execution_result: dict[str, Any] | None
+    final_execution_result: dict[str, Any] | None
+    execution_status: str | None
+    execution_time_ms: int | None
+    code_runner: str | None
+    code_generation_source: str | None
+    safety_check_status: str | None
     metadata: dict[str, Any]

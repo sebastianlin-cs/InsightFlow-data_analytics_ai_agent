@@ -4,6 +4,10 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.agent.code_execution.generator import generate_analysis_code, repair_analysis_code
+from app.agent.code_execution.reentry import decide_reentry
+from app.agent.code_execution.runner import run_generated_code_subprocess
+from app.agent.code_execution.safety import validate_generated_code
 from app.agent.llm_client import get_llm_client
 from app.agent.planner import build_rule_based_plan
 from app.agent.router import route_intent
@@ -27,6 +31,7 @@ from app.services.analysis_session_service import (
 from app.services.data_catalog_service import get_dataset_schema_rows
 
 RECENT_MESSAGE_LIMIT = 10
+CODE_EXECUTION_TIMEOUT_SECONDS = 8
 
 
 class AgentDatasetNotFoundError(Exception):
@@ -79,6 +84,7 @@ def planning_node(state: AgentState) -> AgentState:
             plan = validate_llm_plan(raw_plan, state.get("dataset_schema", []))
             state.update(plan)
             state["planner_source"] = "llm"
+            state["execution_mode"] = _decide_execution_mode(state)
             return state
         except Exception as exc:
             _set_fallback_reason(state, str(exc))
@@ -90,6 +96,7 @@ def planning_node(state: AgentState) -> AgentState:
     )
     state.update(plan)
     state["planner_source"] = "rule_based"
+    state["execution_mode"] = _decide_execution_mode(state)
     return state
 
 
@@ -117,7 +124,7 @@ def validation_node(state: AgentState) -> AgentState:
         ]
         return state
 
-    if state.get("intent") == "visualization":
+    if state.get("intent") == "visualization" and state.get("execution_mode") != "generated_code":
         config = state.get("chart_config", {})
         needs_xy = config.get("chart_type") in {"bar", "line", "scatter"}
         missing_xy = needs_xy and (not config.get("x") or not config.get("y"))
@@ -132,6 +139,9 @@ def validation_node(state: AgentState) -> AgentState:
 
 def dispatch_node(state: AgentState) -> AgentState:
     """Dispatch state to the handler that matches the current intent."""
+    if state.get("execution_mode") == "generated_code":
+        return generated_code_handler(state)
+
     handlers = {
         "schema_question": schema_handler,
         "data_overview": overview_handler,
@@ -141,6 +151,140 @@ def dispatch_node(state: AgentState) -> AgentState:
         "unsupported": unsupported_handler,
     }
     return handlers.get(state.get("intent", "unsupported"), unsupported_handler)(state)
+
+
+def generated_code_handler(state: AgentState) -> AgentState:
+    """Generate, validate, and execute controlled pandas code in a subprocess."""
+    state["selected_tool"] = "generated_pandas_code"
+    state["code_runner"] = "subprocess"
+    state["code_generation_source"] = "llm" if settings.LLM_ENABLED else "unavailable"
+    if not settings.LLM_ENABLED:
+        result = _code_error_result("Generated code execution requires LLM_ENABLED=true.")
+        state["code_execution_result"] = result
+        state["final_execution_result"] = result
+        state["tool_result"] = result
+        state["execution_status"] = result["status"]
+        state["execution_time_ms"] = result["execution_time_ms"]
+        state["error"] = result["error"]
+        state["follow_up_questions"] = ["Enable and configure the LLM before using generated-code analysis."]
+        return state
+
+    llm_client = get_llm_client(settings)
+    try:
+        generation = generate_analysis_code(
+            llm_client=llm_client,
+            user_query=state["user_query"],
+            dataset_schema=state.get("dataset_schema", []),
+            analysis_plan=state.get("analysis_plan", []),
+        )
+    except Exception as exc:
+        result = _code_error_result(f"Code generation failed: {exc}")
+        state["code_generation_result"] = {"error": str(exc)}
+        state["code_execution_result"] = result
+        state["final_execution_result"] = result
+        state["tool_result"] = result
+        state["execution_status"] = result["status"]
+        state["execution_time_ms"] = result["execution_time_ms"]
+        state["error"] = result["error"]
+        return state
+
+    code = generation["code"]
+    state["code_generation_result"] = generation
+    state["generated_code"] = code
+    state["generated_code_preview"] = _code_preview(code)
+    safety = validate_generated_code(code)
+    state["code_safety_result"] = safety
+    state["safety_check_status"] = "passed" if safety.get("passed") else "failed"
+    if not safety.get("passed"):
+        result = _blocked_result(safety)
+        state["code_execution_result"] = result
+        state["final_execution_result"] = result
+        state["tool_result"] = result
+        state["execution_status"] = result["status"]
+        state["execution_time_ms"] = result["execution_time_ms"]
+        state["error"] = result["error"]
+        return state
+
+    first_result = _run_code_attempt(state, code)
+    state["code_execution_result"] = first_result
+    state["first_execution_error"] = first_result.get("error")
+    state["execution_status"] = first_result.get("status")
+    state["execution_time_ms"] = first_result.get("execution_time_ms")
+    if first_result.get("status") == "success":
+        state["final_execution_result"] = first_result
+        state["tool_result"] = first_result
+        return state
+
+    current_result = first_result
+    current_safety = safety
+    current_code = code
+    while True:
+        decision = decide_reentry(
+            execution_result=current_result,
+            safety_result=current_safety,
+            retry_count=state.get("retry_count", 0),
+            max_retries=state.get("max_retries", 1),
+        )
+        if not decision.get("should_retry"):
+            state["final_execution_result"] = current_result
+            state["tool_result"] = current_result
+            state["error"] = current_result.get("error")
+            return state
+
+        next_retry = state.get("retry_count", 0) + 1
+        state["reentry_used"] = True
+        state["retry_count"] = next_retry
+        try:
+            repair = repair_analysis_code(
+                llm_client=llm_client,
+                user_query=state["user_query"],
+                dataset_schema=state.get("dataset_schema", []),
+                analysis_plan=state.get("analysis_plan", []),
+                previous_code=current_code,
+                execution_error=current_result.get("error"),
+                stderr=current_result.get("stderr", ""),
+                retry_count=next_retry,
+                max_retries=state.get("max_retries", 1),
+            )
+        except Exception as exc:
+            result = _code_error_result(f"Code repair failed: {exc}")
+            state["debug_generation_result"] = {"error": str(exc)}
+            state["debug_execution_result"] = result
+            state["final_execution_result"] = result
+            state["tool_result"] = result
+            state["execution_status"] = result["status"]
+            state["execution_time_ms"] = result["execution_time_ms"]
+            state["error"] = result["error"]
+            return state
+
+        repaired_code = repair["code"]
+        state["debug_generation_result"] = repair
+        state["generated_code_preview"] = _code_preview(repaired_code)
+        debug_safety = validate_generated_code(repaired_code)
+        state["debug_safety_result"] = debug_safety
+        if not debug_safety.get("passed"):
+            result = _blocked_result(debug_safety)
+            state["debug_execution_result"] = result
+            state["final_execution_result"] = result
+            state["tool_result"] = result
+            state["execution_status"] = result["status"]
+            state["execution_time_ms"] = result["execution_time_ms"]
+            state["error"] = result["error"]
+            return state
+
+        debug_result = _run_code_attempt(state, repaired_code)
+        state["debug_execution_result"] = debug_result
+        state["execution_status"] = debug_result.get("status")
+        state["execution_time_ms"] = debug_result.get("execution_time_ms")
+        state["error"] = debug_result.get("error")
+        if debug_result.get("status") == "success":
+            state["final_execution_result"] = debug_result
+            state["tool_result"] = debug_result
+            return state
+        current_result = debug_result
+        current_safety = debug_safety
+        current_code = repaired_code
+    return state
 
 
 def schema_handler(state: AgentState) -> AgentState:
@@ -238,6 +382,39 @@ def unsupported_handler(state: AgentState) -> AgentState:
 
 def response_generation_node(state: AgentState) -> AgentState:
     """Generate an answer with optional LLM rewriting and template fallback."""
+    if state.get("execution_mode") == "generated_code":
+        if settings.LLM_ENABLED:
+            try:
+                response = get_llm_client(settings).generate_code_response(
+                    user_query=state["user_query"],
+                    execution_mode="generated_code",
+                    analysis_plan=state.get("analysis_plan", []),
+                    code_execution_result=state.get("final_execution_result", {}) or {},
+                    reentry_info={
+                        "used": state.get("reentry_used", False),
+                        "retry_count": state.get("retry_count", 0),
+                        "repair_explanation": (
+                            state.get("debug_generation_result") or {}
+                        ).get("repair_explanation"),
+                    },
+                )
+                state["final_answer"] = _coerce_llm_answer(response)
+                follow_ups = response.get("follow_up_questions") if isinstance(response, dict) else None
+                if isinstance(follow_ups, list):
+                    state["follow_up_questions"] = [
+                        item for item in follow_ups if isinstance(item, str)
+                    ]
+                state["response_source"] = "llm"
+                state["metadata"] = _response_metadata(state)
+                return state
+            except Exception as exc:
+                _set_fallback_reason(state, str(exc))
+
+        _apply_template_response(state)
+        state["response_source"] = "template"
+        state["metadata"] = _response_metadata(state)
+        return state
+
     if settings.LLM_ENABLED:
         try:
             answer = get_llm_client(settings).generate_response(
@@ -266,7 +443,9 @@ def _apply_template_response(state: AgentState) -> None:
     """Populate final_answer using the deterministic v1 template responses."""
     intent = state.get("intent", "unsupported")
     result = state.get("tool_result", {})
-    if intent == "schema_question":
+    if state.get("execution_mode") == "generated_code":
+        state["final_answer"] = _code_execution_answer(state)
+    elif intent == "schema_question":
         state["final_answer"] = _schema_answer(state)
     elif intent == "data_overview":
         state["final_answer"] = _overview_answer(result)
@@ -309,6 +488,10 @@ def save_session_node(db: Session, current_user: User, state: AgentState) -> Age
         "response_source": state.get("response_source"),
         "fallback_reason": state.get("fallback_reason"),
         "agent_trace": agent_trace,
+        "execution_mode": state.get("execution_mode"),
+        "code_execution_result": state.get("final_execution_result")
+        or state.get("code_execution_result"),
+        "generated_code_preview": state.get("generated_code_preview"),
     }
     create_session_message(
         db=db,
@@ -394,6 +577,127 @@ def _copy_tool_error(state: AgentState) -> None:
         state["error"] = error.get("message") if isinstance(error, dict) else str(error)
 
 
+def _decide_execution_mode(state: AgentState) -> str:
+    if state.get("execution_mode") == "generated_code":
+        return "generated_code"
+    if state.get("intent") not in {"analysis", "visualization"}:
+        return "fixed_tool"
+    query = state.get("user_query", "").lower()
+    complex_terms = {
+        "filter",
+        "where",
+        "top",
+        "rank",
+        "ranking",
+        "sort",
+        "derived",
+        "margin",
+        "ratio",
+        "growth",
+        "monthly",
+        "month over month",
+        "rolling",
+        "cumulative",
+        "percent",
+        "percentage",
+        "multiple",
+    }
+    if any(term in query for term in complex_terms):
+        return "generated_code"
+    if query.count(" by ") > 1:
+        return "generated_code"
+    return "fixed_tool"
+
+
+def _run_code_attempt(state: AgentState, code: str) -> dict[str, Any]:
+    output_dir = Path(settings.UPLOAD_DIR) / "code_outputs" / f"session_{state['session_id']}"
+    chart_dir = Path(settings.UPLOAD_DIR) / "charts" / f"session_{state['session_id']}"
+    return run_generated_code_subprocess(
+        code=code,
+        dataset_path=state["dataset_path"],
+        session_id=state["session_id"],
+        timeout_seconds=CODE_EXECUTION_TIMEOUT_SECONDS,
+        output_dir=str(output_dir),
+        chart_output_dir=str(chart_dir),
+    )
+
+
+def _blocked_result(safety_result: dict[str, Any]) -> dict[str, Any]:
+    reason = safety_result.get("reason") or "Generated code failed safety validation."
+    return {
+        "status": "blocked",
+        "answer": None,
+        "tables": {},
+        "charts": [],
+        "metadata": {"safety_result": safety_result},
+        "stdout": "",
+        "stderr": "",
+        "error": reason,
+        "execution_time_ms": 0,
+    }
+
+
+def _code_error_result(error: str) -> dict[str, Any]:
+    return {
+        "status": "error",
+        "answer": None,
+        "tables": {},
+        "charts": [],
+        "metadata": {},
+        "stdout": "",
+        "stderr": "",
+        "error": error,
+        "execution_time_ms": 0,
+    }
+
+
+def _code_preview(code: str, max_chars: int = 1600) -> str:
+    return code if len(code) <= max_chars else code[:max_chars] + "\n..."
+
+
+def _safety_status(safety_result: dict[str, Any] | None) -> str | None:
+    if not safety_result:
+        return None
+    return "passed" if safety_result.get("passed") else "failed"
+
+
+def _code_trace_steps(state: AgentState) -> list[str]:
+    steps = ["Selected generated code execution mode", "Generated pandas analysis code"]
+    safety = state.get("code_safety_result") or {}
+    if safety.get("passed"):
+        steps.append("Passed AST safety validation")
+        steps.append("Executed generated code")
+    else:
+        steps.extend(["Failed AST safety validation", "Blocked execution"])
+        return steps
+
+    first_status = (state.get("code_execution_result") or {}).get("status")
+    if first_status == "success":
+        steps.append("Executed generated code successfully")
+    elif first_status == "timeout":
+        steps.append("Execution timed out")
+    elif first_status == "error":
+        steps.append("Execution failed with retryable error")
+
+    if state.get("reentry_used"):
+        steps.extend(
+            [
+                "Triggered one debug reentry",
+                "Generated repaired code",
+                "Passed AST safety validation for repaired code"
+                if (state.get("debug_safety_result") or {}).get("passed")
+                else "Failed AST safety validation for repaired code",
+            ]
+        )
+        debug_status = (state.get("debug_execution_result") or {}).get("status")
+        if debug_status == "success":
+            steps.append("Executed repaired code successfully")
+        elif debug_status:
+            steps.append("Executed repaired code with final error")
+    steps.append("Generated final response")
+    return steps
+
+
 def _set_fallback_reason(state: AgentState, reason: str) -> None:
     if not state.get("fallback_reason"):
         state["fallback_reason"] = reason
@@ -401,7 +705,7 @@ def _set_fallback_reason(state: AgentState, reason: str) -> None:
 
 def _response_metadata(state: AgentState) -> dict[str, Any]:
     return {
-        "mode": "langgraph_pandas_agent_v1_1",
+        "mode": "langgraph_pandas_agent_v2_0",
         "used_schema": bool(state.get("dataset_schema")),
         "used_recent_messages": bool(state.get("recent_messages")),
         "message_saved": False,
@@ -414,6 +718,14 @@ def _response_metadata(state: AgentState) -> dict[str, Any]:
         "planner_source": state.get("planner_source"),
         "response_source": state.get("response_source"),
         "fallback_reason": state.get("fallback_reason"),
+        "execution_mode": state.get("execution_mode"),
+        "code_runner": state.get("code_runner"),
+        "safety_check_status": state.get("safety_check_status"),
+        "execution_status": state.get("execution_status"),
+        "execution_time_ms": state.get("execution_time_ms"),
+        "reentry_used": state.get("reentry_used"),
+        "retry_count": state.get("retry_count"),
+        "max_retries": state.get("max_retries"),
     }
 
 
@@ -424,11 +736,30 @@ def build_agent_trace(state: AgentState, *, include_saved_step: bool = False) ->
         "Classified user intent",
         "Generated analysis plan",
         "Validated required columns",
-        "Executed selected tool",
-        "Generated final response",
     ]
+    if state.get("execution_mode") == "generated_code":
+        steps.extend(_code_trace_steps(state))
+    else:
+        steps.extend(["Executed selected tool", "Generated final response"])
     if include_saved_step:
         steps.append("Saved analysis message")
+    first_attempt = None
+    if state.get("code_execution_result") or state.get("code_safety_result"):
+        first_attempt = {
+            "safety_check": _safety_status(state.get("code_safety_result")),
+            "execution_status": (state.get("code_execution_result") or {}).get("status"),
+            "error": (state.get("code_execution_result") or {}).get("error"),
+        }
+    repair_attempt = None
+    if state.get("debug_generation_result") or state.get("debug_execution_result"):
+        repair_attempt = {
+            "safety_check": _safety_status(state.get("debug_safety_result")),
+            "execution_status": (state.get("debug_execution_result") or {}).get("status"),
+            "error": (state.get("debug_execution_result") or {}).get("error"),
+            "repair_explanation": (state.get("debug_generation_result") or {}).get(
+                "repair_explanation"
+            ),
+        }
     return {
         "intent": state.get("intent"),
         "planner_source": state.get("planner_source"),
@@ -439,6 +770,22 @@ def build_agent_trace(state: AgentState, *, include_saved_step: bool = False) ->
         "fallback_reason": state.get("fallback_reason"),
         "llm_enabled": state.get("llm_enabled"),
         "llm_provider": state.get("llm_provider"),
+        "execution_mode": state.get("execution_mode"),
+        "code_generation_source": state.get("code_generation_source"),
+        "safety_check": state.get("safety_check_status"),
+        "runner": state.get("code_runner"),
+        "timeout_seconds": CODE_EXECUTION_TIMEOUT_SECONDS
+        if state.get("execution_mode") == "generated_code"
+        else None,
+        "execution_status": state.get("execution_status"),
+        "execution_time_ms": state.get("execution_time_ms"),
+        "reentry_used": state.get("reentry_used"),
+        "retry_count": state.get("retry_count"),
+        "max_retries": state.get("max_retries"),
+        "first_attempt": first_attempt,
+        "repair_attempt": repair_attempt,
+        "generated_code_preview": state.get("generated_code_preview"),
+        "error": state.get("error"),
         "steps": steps,
     }
 
@@ -488,6 +835,19 @@ def _analysis_answer(state: AgentState) -> str:
     if selected_tool == "correlation_tool":
         return "I calculated numeric correlations. The structured result contains the correlation matrix."
     return "I calculated descriptive statistics. The structured result contains the summary table."
+
+
+def _code_execution_answer(state: AgentState) -> str:
+    result = state.get("final_execution_result") or state.get("code_execution_result") or {}
+    status = result.get("status")
+    if status == "success":
+        answer = result.get("answer")
+        return str(answer) if answer else "I completed the generated pandas analysis. The structured result contains the output."
+    if status == "blocked":
+        return f"I blocked the generated code before execution: {result.get('error')}"
+    if status == "timeout":
+        return f"The generated analysis timed out: {result.get('error')}"
+    return f"I could not complete the generated analysis: {result.get('error')}"
 
 
 def _visualization_answer(state: AgentState) -> str:

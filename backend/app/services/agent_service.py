@@ -12,6 +12,7 @@ def run_langgraph_pandas_agent_query(
     current_user: User,
     session_id: int,
     query: str,
+    max_retries: int | None = None,
 ) -> AgentQueryResponse:
     """Run the v1 LangGraph/Pandas agent and return a frontend-compatible response."""
     state: AgentState = {
@@ -32,6 +33,25 @@ def run_langgraph_pandas_agent_query(
         "response_source": "template",
         "fallback_reason": None,
         "agent_trace": {},
+        "execution_mode": "fixed_tool",
+        "generated_code": None,
+        "generated_code_preview": None,
+        "code_generation_result": None,
+        "code_safety_result": None,
+        "code_execution_result": None,
+        "reentry_used": False,
+        "retry_count": 0,
+        "max_retries": max_retries if max_retries is not None else 1,
+        "first_execution_error": None,
+        "debug_generation_result": None,
+        "debug_safety_result": None,
+        "debug_execution_result": None,
+        "final_execution_result": None,
+        "execution_status": None,
+        "execution_time_ms": None,
+        "code_runner": None,
+        "code_generation_source": None,
+        "safety_check_status": None,
     }
     final_state = run_agent_graph(db, current_user, state)
     metadata = final_state.get("metadata", {})
@@ -51,6 +71,10 @@ def run_langgraph_pandas_agent_query(
         chart_url=final_state.get("chart_url"),
         follow_up_questions=final_state.get("follow_up_questions", []),
         agent_trace=agent_trace,
+        execution_mode=final_state.get("execution_mode"),
+        code_execution_result=final_state.get("final_execution_result")
+        or final_state.get("code_execution_result"),
+        generated_code_preview=final_state.get("generated_code_preview"),
         metadata=metadata,
     )
 
@@ -60,6 +84,7 @@ def run_minimal_agent_query(
     current_user: User,
     session_id: int,
     query: str,
+    max_retries: int | None = None,
 ) -> AgentQueryResponse:
     """Backward-compatible service alias for the upgraded v1 agent."""
     return run_langgraph_pandas_agent_query(
@@ -67,4 +92,5 @@ def run_minimal_agent_query(
         current_user=current_user,
         session_id=session_id,
         query=query,
+        max_retries=max_retries,
     )

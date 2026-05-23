@@ -5,6 +5,11 @@ import urllib.error
 import urllib.request
 from typing import Any
 
+from app.agent.code_execution.prompts import (
+    build_code_generation_prompt,
+    build_code_repair_prompt,
+    build_code_response_prompt,
+)
 from app.agent.prompts import build_planner_prompt, build_response_prompt
 
 
@@ -36,6 +41,43 @@ class BaseLLMClient:
         """Return a final answer based only on already-computed tool output."""
         raise NotImplementedError
 
+    def generate_code(
+        self,
+        *,
+        user_query: str,
+        dataset_schema: list[dict[str, Any]],
+        analysis_plan: list[str],
+    ) -> dict[str, Any]:
+        """Return generated pandas code following the analyze(df) contract."""
+        raise NotImplementedError
+
+    def repair_code(
+        self,
+        *,
+        user_query: str,
+        dataset_schema: list[dict[str, Any]],
+        analysis_plan: list[str],
+        previous_code: str,
+        execution_error: str | None,
+        stderr: str,
+        retry_count: int,
+        max_retries: int,
+    ) -> dict[str, Any]:
+        """Return repaired pandas code after one failed execution attempt."""
+        raise NotImplementedError
+
+    def generate_code_response(
+        self,
+        *,
+        user_query: str,
+        execution_mode: str,
+        analysis_plan: list[str],
+        code_execution_result: dict[str, Any],
+        reentry_info: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Return a user-facing summary for a generated-code result."""
+        raise NotImplementedError
+
 
 class NoOpLLMClient(BaseLLMClient):
     """LLM client used when LLM is disabled or not fully configured."""
@@ -65,6 +107,43 @@ class NoOpLLMClient(BaseLLMClient):
         error: str | None = None,
         follow_up_questions: list[str] | None = None,
     ) -> str | dict[str, Any]:
+        """Raise a clear error instead of attempting an LLM request."""
+        raise RuntimeError(self.reason)
+
+    def generate_code(
+        self,
+        *,
+        user_query: str,
+        dataset_schema: list[dict[str, Any]],
+        analysis_plan: list[str],
+    ) -> dict[str, Any]:
+        """Raise a clear error instead of attempting an LLM request."""
+        raise RuntimeError(self.reason)
+
+    def repair_code(
+        self,
+        *,
+        user_query: str,
+        dataset_schema: list[dict[str, Any]],
+        analysis_plan: list[str],
+        previous_code: str,
+        execution_error: str | None,
+        stderr: str,
+        retry_count: int,
+        max_retries: int,
+    ) -> dict[str, Any]:
+        """Raise a clear error instead of attempting an LLM request."""
+        raise RuntimeError(self.reason)
+
+    def generate_code_response(
+        self,
+        *,
+        user_query: str,
+        execution_mode: str,
+        analysis_plan: list[str],
+        code_execution_result: dict[str, Any],
+        reentry_info: dict[str, Any],
+    ) -> dict[str, Any]:
         """Raise a clear error instead of attempting an LLM request."""
         raise RuntimeError(self.reason)
 
@@ -127,6 +206,65 @@ class OpenAICompatibleLLMClient(BaseLLMClient):
             follow_up_questions=follow_up_questions,
         )
         return self._chat_completion(prompt)
+
+    def generate_code(
+        self,
+        *,
+        user_query: str,
+        dataset_schema: list[dict[str, Any]],
+        analysis_plan: list[str],
+    ) -> dict[str, Any]:
+        """Ask the LLM to generate a constrained analyze(df) function."""
+        prompt = build_code_generation_prompt(
+            user_query=user_query,
+            dataset_schema=dataset_schema,
+            analysis_plan=analysis_plan,
+        )
+        return _parse_json_object(self._chat_completion(prompt))
+
+    def repair_code(
+        self,
+        *,
+        user_query: str,
+        dataset_schema: list[dict[str, Any]],
+        analysis_plan: list[str],
+        previous_code: str,
+        execution_error: str | None,
+        stderr: str,
+        retry_count: int,
+        max_retries: int,
+    ) -> dict[str, Any]:
+        """Ask the LLM to repair one failed analyze(df) function."""
+        prompt = build_code_repair_prompt(
+            user_query=user_query,
+            dataset_schema=dataset_schema,
+            analysis_plan=analysis_plan,
+            previous_code=previous_code,
+            execution_error=execution_error,
+            stderr=stderr,
+            retry_count=retry_count,
+            max_retries=max_retries,
+        )
+        return _parse_json_object(self._chat_completion(prompt))
+
+    def generate_code_response(
+        self,
+        *,
+        user_query: str,
+        execution_mode: str,
+        analysis_plan: list[str],
+        code_execution_result: dict[str, Any],
+        reentry_info: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Ask the LLM to explain a generated-code execution result."""
+        prompt = build_code_response_prompt(
+            user_query=user_query,
+            execution_mode=execution_mode,
+            analysis_plan=analysis_plan,
+            code_execution_result=code_execution_result,
+            reentry_info=reentry_info,
+        )
+        return _parse_json_object(self._chat_completion(prompt))
 
     def _chat_completion(self, prompt: str) -> str:
         payload = {

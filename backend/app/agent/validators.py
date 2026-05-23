@@ -10,6 +10,7 @@ ALLOWED_TOOLS = {
     "generate_chart_tool",
 }
 ALLOWED_CHART_TYPES = {"bar", "line", "histogram", "scatter", None}
+ALLOWED_EXECUTION_MODES = {"fixed_tool", "generated_code", None}
 
 
 class LLMPlanValidationError(ValueError):
@@ -48,6 +49,9 @@ def validate_llm_plan(
         chart_type = normalized_chart_config.get("chart_type")
         if chart_type not in ALLOWED_CHART_TYPES:
             raise LLMPlanValidationError(f"Unsupported chart_type: {chart_type}")
+    execution_mode = raw_plan.get("execution_mode")
+    if execution_mode not in ALLOWED_EXECUTION_MODES:
+        raise LLMPlanValidationError(f"Unsupported execution_mode: {execution_mode}")
 
     return {
         "required_columns": list(dict.fromkeys(normalized_required)),
@@ -55,6 +59,7 @@ def validate_llm_plan(
         "selected_tool": selected_tool,
         "tool_input": normalized_tool_input,
         "chart_config": normalized_chart_config,
+        "execution_mode": execution_mode or "fixed_tool",
     }
 
 

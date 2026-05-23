@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field, field_validator
 class AgentQueryRequest(BaseModel):
     session_id: int
     query: str = Field(min_length=1)
+    max_retries: int | None = Field(default=None, ge=0, le=3)
 
     @field_validator("query")
     @classmethod
@@ -26,6 +27,20 @@ class AgentTrace(BaseModel):
     fallback_reason: str | None = None
     llm_enabled: bool | None = None
     llm_provider: str | None = None
+    execution_mode: str | None = None
+    code_generation_source: str | None = None
+    safety_check: str | None = None
+    runner: str | None = None
+    timeout_seconds: int | None = None
+    execution_status: str | None = None
+    execution_time_ms: int | None = None
+    reentry_used: bool | None = None
+    retry_count: int | None = None
+    max_retries: int | None = None
+    first_attempt: dict[str, Any] | None = None
+    repair_attempt: dict[str, Any] | None = None
+    generated_code_preview: str | None = None
+    error: str | None = None
     steps: list[str] = Field(default_factory=list)
 
 
@@ -40,4 +55,7 @@ class AgentQueryResponse(BaseModel):
     chart_url: str | None = None
     follow_up_questions: list[str] = Field(default_factory=list)
     agent_trace: AgentTrace | None = None
+    execution_mode: str | None = None
+    code_execution_result: dict[str, Any] | None = None
+    generated_code_preview: str | None = None
     metadata: dict[str, Any]

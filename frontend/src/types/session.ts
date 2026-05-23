@@ -26,4 +26,7 @@ export type AnalysisMessage = {
   tool_result?: unknown;
   chart_url?: string | null;
   follow_up_questions?: string[];
+  execution_mode?: string | null;
+  code_execution_result?: unknown;
+  generated_code_preview?: string | null;
 };
