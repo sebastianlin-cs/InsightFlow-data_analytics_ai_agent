@@ -1,5 +1,34 @@
 # InsightFlow
 
+## Demo Walkthrough
+
+InsightFlow provides a full workflow from authentication to dataset upload,
+schema inspection, and agent-assisted analysis.
+
+### Login
+
+![Login page](demo_photo/login.png)
+
+Users can sign in securely and enter their personal analysis workspace.
+
+### Workspace
+
+![Workspace page](demo_photo/workplace.png)
+
+Users can upload CSV or Excel datasets, review their dataset list, and open a dataset for analysis.
+
+### Dataset Detail
+
+![Dataset detail page](demo_photo/data_detail.png)
+
+Users can inspect dataset metadata, schema catalog, preview rows, and start or resume analysis sessions.
+
+### Agent Analysis
+
+![Agent analysis page](demo_photo/analysis.png)
+
+Users can ask natural language analysis questions and review the answer, plan, trace, tool output, and generated charts.
+
 ## Project Overview
 
 InsightFlow is a full-stack data analysis AI agent platform. Users can upload
@@ -20,6 +49,29 @@ workflow with optional LLM planning and response generation.
 - LangGraph
 - Pandas
 
+## Technical Architecture
+
+```mermaid
+flowchart TD
+    Frontend["Frontend<br/>React + Vite"] --> Backend["FastAPI Backend"]
+    Backend --> Auth["Auth Module<br/>JWT + user ownership"]
+    Backend --> Dataset["Dataset Module<br/>upload, preview, schema"]
+    Backend --> Sessions["Analysis Session<br/>messages + history"]
+    Backend --> Agent["Agent Service"]
+    Auth --> Postgres["PostgreSQL"]
+    Dataset --> Postgres
+    Sessions --> Postgres
+    Dataset --> Catalog["Dataset Catalog<br/>schema metadata"]
+    Catalog --> Postgres
+    Agent --> Catalog
+    Agent --> Sessions
+    Agent --> LLM["LLM Code Generator<br/>OpenAI-compatible API"]
+    Agent --> Executor["Pandas Sandbox Executor<br/>AST checks + subprocess timeout"]
+    Executor --> Interpreter["Result Interpreter<br/>tables, charts, trace"]
+    Interpreter --> Backend
+    Backend --> Frontend
+```
+
 ## Agent Architecture
 
 The current agent keeps all data execution inside deterministic Python tools.
@@ -30,26 +82,78 @@ back to rule-based behavior for fixed-tool requests.
 
 ```mermaid
 flowchart TD
-    A[User Query] --> B[Load Dataset and Session Context]
-    B --> C[Rule-based Intent Router]
+    A["User Query"] --> B["Load Dataset and Session Context"]
+    B --> C["Rule-based Intent Router"]
     C --> D{LLM Enabled?}
-    D -->|Yes| E[LLM Structured Planner]
-    D -->|No| F[Rule-based Planner]
-    E --> G[Plan Validation]
-    F --> G[Plan Validation]
+    D -->|Yes| E["LLM Structured Planner"]
+    D -->|No| F["Rule-based Planner"]
+    E --> G["Plan Validation"]
+    F --> G["Plan Validation"]
     G --> H{Execution Mode}
-    H -->|fixed_tool| I[Pandas / Chart Tool Execution]
-    H -->|generated_code| J[Generate analyze(df)]
-    J --> K[AST Safety Validation]
-    K --> L[Timeout-limited Subprocess Runner]
+    H -->|fixed_tool| I["Pandas / Chart Tool Execution"]
+    H -->|generated_code| J["Generate analyze(df)"]
+    J --> K["AST Safety Validation"]
+    K --> L["Timeout-limited Subprocess Runner"]
     L --> M{Retryable Error?}
-    M -->|Once| N[Debug Reentry and Repair]
+    M -->|Retry Budget| N["Debug Reentry and Repair"]
     N --> K
-    M -->|No| O[LLM / Template Response]
+    M -->|No| O["LLM / Template Response"]
     I --> O
-    O --> P[Save Analysis Message]
-    P --> Q[Frontend Agent Trace Display]
+    O --> P["Save Analysis Message"]
+    P --> Q["Frontend Agent Trace Display"]
 ```
+
+## Agent Graph Design
+
+```mermaid
+flowchart TD
+    Start["/api/agent/query"] --> Load["Load Context Node"]
+    Load --> Intent["Intent Router Node"]
+    Intent --> Plan["Planning Node"]
+    Plan --> Validate["Validation Node"]
+    Validate --> Dispatch{"Dispatch Node"}
+    Dispatch --> Schema["Schema Handler"]
+    Dispatch --> Overview["Overview Handler"]
+    Dispatch --> Analysis["Analysis Handler"]
+    Dispatch --> Viz["Visualization Handler"]
+    Dispatch --> Code["Generated Code Handler"]
+    Dispatch --> Clarify["Clarification Handler"]
+    Dispatch --> Unsupported["Unsupported Handler"]
+    Schema --> Response["Response Generation Node"]
+    Overview --> Response
+    Analysis --> Response
+    Viz --> Response
+    Code --> Response
+    Clarify --> Response
+    Unsupported --> Response
+    Response --> Save["Save Session Node"]
+    Save --> Return["AgentQueryResponse"]
+```
+
+The graph is intentionally narrow: routing and validation happen before any
+tool or generated-code execution, and session persistence happens only after the
+final response is prepared.
+
+## AgentState Structure
+
+The backend carries one `AgentState` dictionary through the LangGraph workflow.
+It is designed to preserve both the user-facing answer and the internal trace
+needed for debugging.
+
+| Area | Key Fields | Purpose |
+|---|---|---|
+| Identity | `user_id`, `session_id`, `dataset_id` | Preserve request ownership and session context |
+| Query Context | `user_query`, `recent_messages`, `dataset_schema`, `dataset_path`, `dataset_file_type` | Give planner and tools enough context without loading data into PostgreSQL |
+| Routing and Planning | `intent`, `required_columns`, `analysis_plan`, `selected_tool`, `tool_input`, `chart_config` | Represent the structured plan before validation and execution |
+| Fixed Tool Result | `tool_result`, `chart_path`, `chart_url`, `follow_up_questions`, `error` | Store deterministic pandas/chart handler outputs |
+| LLM Observability | `llm_enabled`, `llm_provider`, `planner_source`, `response_source`, `fallback_reason` | Show whether LLM or fallback logic was used |
+| Code Execution | `execution_mode`, `generated_code`, `generated_code_preview`, `code_generation_result`, `code_safety_result`, `code_execution_result`, `final_execution_result` | Track controlled generated-code analysis |
+| Debug Reentry | `reentry_used`, `retry_count`, `max_retries`, `first_execution_error`, `debug_generation_result`, `debug_safety_result`, `debug_execution_result` | Preserve first attempt and repaired attempt details |
+| Runtime Summary | `execution_status`, `execution_time_ms`, `code_runner`, `code_generation_source`, `safety_check_status` | Feed the frontend execution trace |
+| Final Output | `final_answer`, `metadata`, `agent_trace` | Return API response and persist assistant message metadata |
+
+The state intentionally stores first and repair attempts separately so a failed
+generated-code run can be inspected without overwriting the original error.
 
 ## Agent Version History
 

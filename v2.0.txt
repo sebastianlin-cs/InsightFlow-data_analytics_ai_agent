@@ -1,0 +1,1052 @@
+InsightFlow 项目最新 Context（截至 v2.0 Controlled Code Execution 跑通）
+
+项目名称：
+InsightFlow
+
+项目路径：
+D:\Emory_MSCS\DAgent\InsightFlow
+
+GitHub repo：
+https://github.com/sebastianlin-cs/InsightFlow-data_analytics_ai_agent
+
+当前主要开发分支：
+feature/langgraph-agent-v1
+
+当前 v2.0 试错开发分支：
+feature/controlled-code-execution-v2
+
+重要提醒：
+main 暂时不是最新 agent demo 分支。
+目前最新 Agent 能力主要在 feature/langgraph-agent-v1 及 v2.0 分支上推进。
+后续不要直接在 main 上开发，除非明确准备合并稳定版本。
+
+一、项目定位
+
+InsightFlow 是一个全栈数据分析 AI Agent 平台。
+
+用户可以：
+1. 注册 / 登录
+2. 上传 CSV / Excel 数据集
+3. 系统把原始数据文件持久化保存到 backend/storage/
+4. 系统生成 Data Catalog / Schema Context 并存入 PostgreSQL
+5. 用户基于某个 dataset 创建 analysis session
+6. 用户在 Agent Chat 中用自然语言向数据集提问
+7. Agent 基于 dataset metadata、schema catalog、session messages、LLM planner、pandas tools 或 controlled code execution 生成分析结果
+
+项目核心目标：
+不是普通 CRUD，而是一个工程化的数据分析 Agent 平台，重点展示：
+- 用户系统
+- 数据资产管理
+- Data Catalog
+- Analysis Session
+- LangGraph workflow
+- LLM planning
+- deterministic pandas tools
+- chart generation
+- agent trace / observability
+- controlled code execution
+- session persistence
+
+核心架构原则：
+PostgreSQL = 控制平面 / 上下文层
+Local storage = 数据平面
+dataset_id = 连接用户、原始数据、Data Catalog、session、messages、Agent workflow 的核心主键
+
+当前数据存储策略：
+- 原始 CSV / Excel 文件保存在本地：
+  backend/storage/datasets/user_{user_id}/...
+- PostgreSQL 只保存：
+  users
+  datasets metadata
+  dataset_schemas / Data Catalog
+  analysis_sessions
+  analysis_messages
+  structured_result_json / metadata
+- 不把用户上传数据逐行导入 PostgreSQL
+- 不动态创建 SQL table
+- 所有 dataset/session/message 都必须通过 current_user 做 ownership 隔离
+
+二、技术栈
+
+Backend:
+- FastAPI
+- PostgreSQL
+- SQLAlchemy
+- Alembic
+- JWT Auth
+- passlib bcrypt
+- python-jose
+- pandas
+- openpyxl
+- xlrd
+- LangGraph
+- matplotlib
+- LLM provider via OpenAI-compatible client
+- DeepSeek V4 Flash 作为当前目标模型
+
+Frontend:
+- React
+- Vite
+- TypeScript
+- Tailwind CSS
+- React Router
+- localStorage 保存 access_token
+
+LLM:
+当前计划 / 配置目标：
+- LLM_PROVIDER=openai_compatible
+- LLM_MODEL=deepseek-v4-flash
+- LLM_BASE_URL=https://api.deepseek.com
+- LLM_API_KEY 走 .env，不提交
+- LLM_ENABLED 可开关
+- LLM 未配置或调用失败时必须 fallback
+
+三、已完成基础版本 v0.2 - v0.9
+
+v0.2 Backend Skeleton:
+- FastAPI 后端骨架
+- PostgreSQL Docker
+- SQLAlchemy
+- Alembic
+- User model
+- Health API
+
+v0.3 Auth:
+- POST /api/auth/register
+- POST /api/auth/login
+- GET /api/auth/me
+- JWT access token
+- current_user dependency
+
+v0.4 Dataset Upload:
+- POST /api/datasets/upload
+- GET /api/datasets
+- GET /api/datasets/{dataset_id}
+- DELETE /api/datasets/{dataset_id}
+- 上传 CSV / Excel
+- 保存原始文件
+- 创建 datasets 记录
+- dataset 绑定 user_id
+
+v0.5 Local Persistent Dataset Asset + Agent-ready Data Catalog:
+- 数据集升级为可复用 Dataset Asset
+- 新增 file_hash
+- 新增 storage_backend / storage_uri
+- 同一用户重复上传同一 file_hash 返回已有 dataset
+- 新增 dataset_schemas 表
+- 上传后自动生成 Data Catalog
+- GET /api/datasets/{dataset_id}/schema
+
+v0.6 Flat Dataset Detail with Head5 Preview:
+- GET /api/datasets/{dataset_id} 返回：
+  dataset metadata
+  schema / catalog
+  preview_columns
+  preview_rows
+  preview_row_count
+- preview 是即时读取本地文件 head(5)，不入库
+
+v0.7 Analysis Session Backend:
+- 新增 analysis_sessions
+- 新增 analysis_messages
+- 用户基于 dataset 创建 session
+- session 绑定 user_id / dataset_id
+- messages 绑定 session_id
+- analysis_sessions.id 就是 session_id
+- APIs:
+  POST /api/analysis-sessions
+  GET /api/analysis-sessions
+  GET /api/analysis-sessions?dataset_id={dataset_id}
+  GET /api/analysis-sessions/{session_id}
+  GET /api/analysis-sessions/{session_id}/messages
+  POST /api/analysis-sessions/{session_id}/messages
+
+v0.8 Minimal Agent Query API:
+- POST /api/agent/query
+- request:
+  {
+    "session_id": 1,
+    "query": "What columns are in this dataset?"
+  }
+- 根据 session_id 找 session
+- 根据 session.dataset_id 找 dataset
+- 校验 ownership
+- 加载 dataset_schemas / Data Catalog
+- 加载 recent messages
+- 保存 user message
+- 生成 minimal rule-based answer
+- 保存 assistant message
+- 返回 answer + metadata
+- 当时还没有 LangGraph / LLM / pandas real analysis / chart / tool harness
+
+v0.9 Minimal React Frontend Foundation:
+- React + Vite + TypeScript + Tailwind
+- 登录 / 注册
+- Workspace dataset list
+- dataset upload / delete
+- dataset detail 页面
+- metadata / schema / head5 preview
+- 创建 analysis session
+- Agent Chat 页面
+- 调用 POST /api/agent/query
+- 显示 session messages
+- 刷新后 messages 仍存在
+- Dataset Detail 页面有历史 Analysis Sessions 列表
+- Dataset Detail 和 Agent Chat 页面有 Back 按钮
+
+四、当前重要后端文件
+
+backend/app/main.py
+backend/app/core/database.py
+backend/app/core/security.py
+backend/app/core/config.py
+
+Models:
+backend/app/models/user.py
+backend/app/models/dataset.py
+backend/app/models/analysis.py
+
+Schemas:
+backend/app/schemas/user.py
+backend/app/schemas/auth.py
+backend/app/schemas/dataset.py
+backend/app/schemas/analysis.py
+backend/app/schemas/agent.py
+
+APIs:
+backend/app/api/auth.py
+backend/app/api/datasets.py
+backend/app/api/analysis_sessions.py
+backend/app/api/agent.py
+
+Services:
+backend/app/services/auth_service.py
+backend/app/services/dataset_service.py
+backend/app/services/file_storage.py
+backend/app/services/storage_service.py
+backend/app/services/dataset_parser.py
+backend/app/services/dataset_preview_service.py
+backend/app/services/data_catalog_service.py
+backend/app/services/schema_inference.py
+backend/app/services/sensitivity_detector.py
+backend/app/services/analysis_session_service.py
+backend/app/services/agent_service.py
+
+Agent:
+backend/app/agent/state.py
+backend/app/agent/graph.py
+backend/app/agent/nodes.py
+backend/app/agent/router.py
+backend/app/agent/planner.py
+backend/app/agent/llm_client.py
+backend/app/agent/prompts.py
+backend/app/agent/tools/dataframe_tools.py
+backend/app/agent/tools/chart_tools.py
+
+v2.0 新增或计划新增：
+backend/app/agent/code_execution/
+  __init__.py
+  generator.py
+  prompts.py
+  safety.py
+  runner.py
+  schemas.py
+  result_parser.py
+
+五、当前重要前端文件
+
+frontend/src/App.tsx
+frontend/src/main.tsx
+
+API:
+frontend/src/api/client.ts
+frontend/src/api/auth.ts
+frontend/src/api/datasets.ts
+frontend/src/api/sessions.ts
+frontend/src/api/agent.ts
+
+Components:
+frontend/src/components/Layout.tsx
+frontend/src/components/BackButton.tsx
+frontend/src/components/DatasetUpload.tsx
+frontend/src/components/DatasetTable.tsx
+frontend/src/components/SchemaTable.tsx
+frontend/src/components/PreviewTable.tsx
+frontend/src/components/MessageList.tsx
+frontend/src/components/ChatInput.tsx
+
+Pages:
+frontend/src/pages/LoginPage.tsx
+frontend/src/pages/RegisterPage.tsx
+frontend/src/pages/WorkspacePage.tsx
+frontend/src/pages/DatasetDetailPage.tsx
+frontend/src/pages/AgentChatPage.tsx
+
+Types:
+frontend/src/types/auth.ts
+frontend/src/types/dataset.ts
+frontend/src/types/session.ts
+frontend/src/types/agent.ts
+
+六、Agent v1.0：Rule-based LangGraph/Pandas Agent
+
+Tag:
+v1.0-rulebased-agent
+
+Commit:
+bd16407 feat(agent): add rule-based langgraph pandas agent v1
+
+核心目标：
+把 v0.8 minimal rule-based answer 升级为 LangGraph/Pandas workflow baseline。
+
+能力：
+- LangGraph workflow scaffold
+- AgentState
+- load context
+- rule-based intent router
+- rule-based planner
+- Python validation
+- pandas fixed tools
+- chart generation tool
+- template response generator
+- save user / assistant messages
+- structured response
+- 保留 /api/agent/query 向后兼容
+
+Intent 类型：
+- schema_question
+- data_overview
+- analysis
+- visualization
+- clarification
+- unsupported
+
+v1.0 workflow:
+User Query
+  -> Load Context
+  -> Intent Router
+  -> Planning
+  -> Validation
+  -> Dispatch
+     -> Schema Handler
+     -> Overview Handler
+     -> Analysis Handler
+     -> Visualization Handler
+     -> Clarification Handler
+     -> Unsupported Handler
+  -> Response Generation
+  -> Save Session
+
+v1.0 pandas tools:
+- profile_dataset_tool
+- aggregate_tool
+- correlation_tool
+- basic_stats_tool
+- generate_chart_tool
+
+v1.0 不做：
+- LLM provider
+- multi-agent
+- SQL agent
+- sandbox execution
+- LLM-generated Python
+- AutoML
+- 多文件 join
+- 长期向量记忆
+
+七、Agent v1.1：LLM Planner + Response Generator
+
+Tag:
+v1.1-llm-ready-agent
+
+Commit:
+dccc4e0 feat(agent): add llm planner and response generator v1.1
+
+核心目标：
+在 v1.0 deterministic workflow 上接入 LLM，但只接入两个相对安全的位置：
+1. Planner
+2. Response Generator
+
+v1.1 workflow:
+User Query
+  -> Load Context
+  -> Rule-based Intent Router
+  -> Planner Node
+       if LLM enabled/configured:
+          try LLM structured planner
+          validate JSON
+          fallback rule-based if failed
+       else:
+          rule-based planner
+  -> Validation
+  -> Pandas / Chart Tool Execution
+  -> Response Generator
+       if LLM enabled/configured:
+          try LLM response summary
+          fallback template if failed
+       else:
+          template response
+  -> Save Session
+
+LLM 配置：
+LLM_ENABLED
+LLM_PROVIDER
+LLM_API_KEY
+LLM_MODEL
+LLM_BASE_URL
+LLM_TIMEOUT_SECONDS
+
+当前推荐配置：
+LLM_PROVIDER=openai_compatible
+LLM_MODEL=deepseek-v4-flash
+LLM_BASE_URL=https://api.deepseek.com
+
+LLMClient:
+- BaseLLMClient
+- NoOpLLMClient
+- OpenAICompatibleLLMClient
+- get_llm_client(settings)
+
+v1.1 metadata:
+- mode: langgraph_pandas_agent_v1_1
+- llm_enabled
+- llm_provider
+- planner_source: llm | rule_based
+- response_source: llm | template
+- fallback_reason
+
+v1.1 不做：
+- LLM Router
+- LLM-generated Python code
+- sandbox execute
+- multi-agent
+- SQL agent
+- self-reflection loop
+
+八、Agent v1.2：Agent Observability + Frontend Display + README Architecture
+
+Tag:
+v1.2-agent-observability
+
+Commit:
+d2a32c0 feat(agent): add observability trace and frontend result display v1.2
+
+当前 branch 状态：
+feature/langgraph-agent-v1 和 feature/agent-observability-v1.2 都指向 d2a32c0。
+v1.2 已 merge 进 feature/langgraph-agent-v1。
+需要确认是否已经 push：
+git push origin feature/langgraph-agent-v1
+git push origin v1.2-agent-observability
+
+核心目标：
+让用户和面试官看到 agent 不是普通 chatbot，而是一个可观测 workflow。
+
+v1.2 增强：
+- 后端统一返回 agent_trace
+- 前端展示 analysis_plan
+- 前端展示 intent / selected_tool / planner_source / response_source / fallback_reason
+- 前端展示 chart_url 图片
+- 前端展示 tool_result JSON / collapsible result
+- README 增加 Agent Architecture
+- README 增加 version history
+- README 增加 current scope / out-of-scope
+
+agent_trace 示例：
+{
+  "intent": "visualization",
+  "planner_source": "llm",
+  "response_source": "llm",
+  "selected_tool": "generate_chart_tool",
+  "validated_columns": ["region", "sales"],
+  "chart_url": "/static/charts/...",
+  "fallback_reason": null,
+  "llm_enabled": true,
+  "llm_provider": "openai_compatible",
+  "steps": [
+    "Loaded dataset context",
+    "Classified user intent",
+    "Generated analysis plan",
+    "Validated required columns",
+    "Executed selected tool",
+    "Generated final response",
+    "Saved analysis message"
+  ]
+}
+
+v1.2 README architecture:
+User Query
+  -> Load Dataset and Session Context
+  -> Rule-based Intent Router
+  -> LLM Structured Planner / Rule-based Planner
+  -> Plan Validation
+  -> Pandas / Chart Tool Execution
+  -> LLM Response Generator / Template Response Generator
+  -> Save Analysis Message
+  -> Frontend Agent Trace Display
+
+九、Agent v2.0：Controlled Pandas Code Execution
+
+当前状态：
+v2.0 已经在 feature/controlled-code-execution-v2 分支上开发并跑通了一个核心 query：
+
+Filter rows where revenue > 1000, group by region, and show the top 5 regions by average units.
+
+这个 query 能跑通说明：
+- 复杂自然语言分析可以进入 generated_code path
+- LLM 可以生成 pandas analyze(df)
+- 系统能执行 filter + groupby + average + top-k
+- 结构化结果能返回给前端 / agent response
+
+当前需要在新 session 继续确认：
+git branch
+git status
+git log --oneline --decorate --graph --all -15
+
+如果 v2.0 还没 commit，按以下方式做版本管理：
+git status
+git diff --stat
+
+确认不提交：
+.env
+.venv/
+.venv312/
+__pycache__/
+backend/storage/
+frontend/node_modules/
+generated chart images
+generated execution temp files
+
+提交：
+git add backend/app/agent
+git add backend/app/services/agent_service.py
+git add backend/app/schemas/agent.py
+git add backend/app/api/agent.py
+git add frontend/src/types
+git add frontend/src/components
+git add frontend/src/pages
+git add README.md
+git add backend/requirements.txt
+git status
+git commit -m "feat(agent): add controlled pandas code execution v2"
+git tag v2.0-controlled-code-execution
+
+推送：
+git push -u origin feature/controlled-code-execution-v2
+git push origin v2.0-controlled-code-execution
+
+如果 v2.0 稳定后再 merge：
+git checkout feature/langgraph-agent-v1
+git merge feature/controlled-code-execution-v2
+git push origin feature/langgraph-agent-v1
+
+十、v2.0 核心设计
+
+v2.0 不是通用 AI coding agent，而是：
+Controlled single-dataset pandas code execution.
+
+核心 scope：
+LLM-generated analyze(df)
++ AST safety validation
++ timeout-limited subprocess runner
++ structured result contract
++ one-time debug reentry
++ agent_trace integration
++ frontend display
+
+v2.0 execution modes:
+- fixed_tool
+- generated_code
+
+fixed_tool 继续处理：
+- schema question
+- dataset overview
+- missing values
+- basic statistics
+- simple groupby aggregation
+- basic correlation
+- simple chart generation
+
+generated_code 处理：
+- multi-step filtering
+- derived metric calculation
+- top-k / ranking
+- multi-column groupby
+- custom pandas logic
+- monthly aggregation
+- rolling calculation
+- growth rate
+- complex sort/filter/groupby combinations
+
+v2.0 workflow:
+User Query
+  -> Load Context
+  -> Intent Router
+  -> Planner
+  -> Execution Mode Decision
+      -> fixed_tool:
+          Existing Pandas / Chart Tools
+      -> generated_code:
+          Code Generation Node
+          AST Safety Validation Node
+          Code Execution Runner Node
+          Code Result Parser Node
+          Optional One-time Debug Reentry
+  -> Response Generator
+  -> Save Session + Agent Trace
+  -> Frontend Display
+
+十一、v2.0 Code Contract
+
+LLM 不能生成完整程序，只能生成：
+
+def analyze(df):
+    ...
+    return {
+        "answer": "...",
+        "tables": {...},
+        "charts": [],
+        "metadata": {...}
+    }
+
+规则：
+- df 已由系统加载
+- LLM 不能读取文件
+- LLM 不能连接数据库
+- LLM 不能联网
+- LLM 不能执行系统命令
+- LLM 不能访问环境变量
+- LLM 不能安装包
+- LLM 不能访问任意路径
+- LLM 不能写数据库
+- LLM 不能多文件 join
+- 只允许当前 session 的当前 dataset
+
+允许库：
+- pandas as pd
+- numpy as np
+- matplotlib.pyplot as plt
+
+禁止模块：
+- os
+- sys
+- subprocess
+- socket
+- requests
+- pathlib
+- shutil
+- pickle
+- multiprocessing
+- threading
+
+禁止函数：
+- open
+- eval
+- exec
+- compile
+- input
+- __import__
+- globals
+- locals
+- vars
+- dir
+- getattr
+- setattr
+- delattr
+
+禁止属性：
+- __dict__
+- __class__
+- __bases__
+- __subclasses__
+- __globals__
+- __code__
+
+十二、v2.0 Code Generation Prompt 输出结构
+
+LLM code generation 应输出 JSON：
+
+{
+  "code": "def analyze(df): ...",
+  "explanation": "...",
+  "columns_used": ["revenue", "region", "units"],
+  "expected_result_keys": ["answer", "tables", "charts", "metadata"]
+}
+
+不要只输出 markdown code block。
+
+十三、v2.0 Safety Validation
+
+使用 AST 做静态安全检查。
+
+输入：
+{
+  "code": "...",
+  "allowed_function_name": "analyze",
+  "allowed_imports": ["pandas", "numpy", "matplotlib", "matplotlib.pyplot"],
+  "forbidden_imports": [...],
+  "forbidden_calls": [...],
+  "forbidden_attributes": [...]
+}
+
+输出成功：
+{
+  "passed": true,
+  "reason": null,
+  "blocked_items": [],
+  "warnings": []
+}
+
+输出失败：
+{
+  "passed": false,
+  "reason": "Forbidden import: os",
+  "blocked_items": ["os"],
+  "warnings": []
+}
+
+要求：
+- code 必须 ast.parse 成功
+- 必须只定义一个顶层函数 analyze
+- analyze 必须只接收 df 一个参数
+- 禁止危险 import/call/attribute
+- 可检测时拦截 while True
+- safety failed 时不得执行
+- safety failed 不进行 reentry retry
+
+十四、v2.0 Subprocess Runner
+
+v2.0 第一版采用 subprocess runner，而不是 Docker sandbox。
+
+Runner 责任：
+- 不在 FastAPI 主进程直接 exec generated code
+- 创建临时 workspace
+- 写入 generated code script
+- 子进程加载 dataset 为 df
+- 子进程调用 analyze(df)
+- 子进程写 result.json
+- 主进程读取 result.json
+- 捕获 stdout / stderr
+- enforce timeout
+- timeout 时 kill process
+- 返回结构化 CodeExecutionResult
+
+注意：
+README 需要声明：
+Current subprocess runner is a local controlled execution MVP, not a production-grade security sandbox.
+
+Runner 输出：
+{
+  "status": "success" | "error" | "timeout" | "blocked",
+  "answer": string | null,
+  "tables": object,
+  "charts": list,
+  "metadata": object,
+  "stdout": string,
+  "stderr": string,
+  "error": string | null,
+  "execution_time_ms": int
+}
+
+十五、v2.0 Reentry / Debug
+
+MVP 只做最多一次 retry：
+max_debug_retry = 1
+
+可以 retry：
+- KeyError
+- TypeError
+- ValueError
+- AttributeError
+- NameError
+- JSON serialization error
+- matplotlib shape mismatch
+- division by zero
+
+不 retry：
+- safety validation failure
+- forbidden import/function
+- timeout
+- network/system access attempt
+- repeated same error
+- max retry reached
+
+Reentry workflow:
+first generated code
+  -> AST safety validation
+  -> execute
+  -> if retryable runtime error:
+       call LLM debug prompt once
+       repaired code
+       AST safety validation again
+       execute repaired code once
+  -> if fail again:
+       stop and return structured error
+
+Debug LLM 输出 JSON：
+{
+  "code": "def analyze(df): ...",
+  "repair_explanation": "...",
+  "changed_columns": {
+    "removed": [],
+    "added": []
+  },
+  "columns_used": [],
+  "expected_result_keys": ["answer", "tables", "charts", "metadata"]
+}
+
+重要：
+修复代码必须再次过 AST safety validation。
+不得因为是 repair 就跳过安全检查。
+
+十六、v2.0 API Response 新增字段
+
+保留：
+- session_id
+- dataset_id
+- answer
+- metadata
+- intent
+- analysis_plan
+- tool_used
+- tool_result
+- chart_url
+- follow_up_questions
+- agent_trace
+
+新增可选：
+- execution_mode
+- code_execution_result
+- generated_code_preview
+
+示例：
+{
+  "session_id": 1,
+  "dataset_id": 1,
+  "answer": "...",
+  "execution_mode": "generated_code",
+  "code_execution_result": {
+    "status": "success",
+    "tables": {},
+    "charts": [],
+    "metadata": {},
+    "error": null,
+    "execution_time_ms": 842
+  },
+  "generated_code_preview": "def analyze(df): ...",
+  "agent_trace": {...},
+  "metadata": {...}
+}
+
+十七、v2.0 Agent Trace
+
+成功并使用 reentry 示例：
+{
+  "execution_mode": "generated_code",
+  "code_generation_source": "llm",
+  "safety_check": "passed",
+  "runner": "subprocess",
+  "timeout_seconds": 8,
+  "execution_status": "success",
+  "execution_time_ms": 842,
+  "reentry_used": true,
+  "retry_count": 1,
+  "first_attempt": {
+    "safety_check": "passed",
+    "execution_status": "error",
+    "error": "KeyError: 'revenue'"
+  },
+  "repair_attempt": {
+    "safety_check": "passed",
+    "execution_status": "success",
+    "repair_explanation": "..."
+  },
+  "generated_code_preview": "def analyze(df): ...",
+  "steps": [
+    "Selected generated code execution mode",
+    "Generated pandas analysis code",
+    "Passed AST safety validation",
+    "Executed generated code",
+    "Execution failed with retryable error",
+    "Triggered one debug reentry",
+    "Generated repaired code",
+    "Passed AST safety validation for repaired code",
+    "Executed repaired code successfully",
+    "Generated final response"
+  ]
+}
+
+安全拦截示例：
+{
+  "execution_mode": "generated_code",
+  "safety_check": "failed",
+  "execution_status": "blocked",
+  "reentry_used": false,
+  "retry_count": 0,
+  "error": "Forbidden import: os",
+  "steps": [
+    "Generated pandas analysis code",
+    "Failed AST safety validation",
+    "Blocked execution"
+  ]
+}
+
+十八、v2.0 前端展示
+
+v1.2 已有 agent trace / plan / tool / chart display。
+v2.0 需要扩展展示：
+- Execution Mode
+- Safety Check
+- Runner
+- Execution Status
+- Execution Time
+- Reentry Used
+- Retry Count
+- Generated Code Preview，折叠显示
+- Code Execution Result JSON，折叠显示
+- First Attempt / Repair Attempt，若存在则显示
+
+要求：
+- 旧历史消息没有这些字段时不能崩
+- 不默认展示大段代码
+- 不暴露完整 backend storage path
+- 保持 Tailwind 简洁样式
+
+十九、v2.0 手动测试建议
+
+已经跑通成功 case：
+Query:
+Filter rows where revenue > 1000, group by region, and show the top 5 regions by average units.
+
+还建议继续测：
+
+1. fixed_tool 仍然正常：
+Calculate average revenue by region
+
+期望：
+execution_mode = fixed_tool 或保持旧 fixed path，不应强制 generated_code。
+
+2. dangerous import 被拦截：
+mock:
+def analyze(df):
+    import os
+    return {"answer": str(os.listdir(".")), "tables": {}, "charts": [], "metadata": {}}
+
+期望：
+safety_check = failed
+execution_status = blocked
+reentry_used = false
+
+3. runtime error 触发一次 reentry：
+让 code 访问不存在字段，如 df["revenue_fake"]
+
+期望：
+first_attempt error
+reentry_used = true
+retry_count = 1
+repair code 重新 safety validation
+最多只 retry 一次
+
+4. timeout 不 retry：
+mock while True
+
+期望：
+timeout 或 safety blocked
+reentry_used = false
+
+二十、Git 当前版本线
+
+已知 log：
+
+d2a32c0 (HEAD -> feature/langgraph-agent-v1, tag: v1.2-agent-observability, feature/agent-observability-v1.2)
+feat(agent): add observability trace and frontend result display v1.2
+
+dccc4e0 (tag: v1.1-llm-ready-agent, origin/feature/langgraph-agent-v1, feature/llm-planner-response-v1)
+feat(agent): add llm planner and response generator v1.1
+
+bd16407 (tag: v1.0-rulebased-agent)
+feat(agent): add rule-based langgraph pandas agent v1
+
+c2dec67
+chore: save v0.9 frontend foundation state
+
+bca2eb9 (origin/main, main, feature/minimal-agent-query, feature/frontend-foundation)
+add minimal agent query api
+
+注意：
+v1.2 后本地 feature/langgraph-agent-v1 曾经 ahead origin/feature/langgraph-agent-v1 by 1 commit。
+需要确认是否已 push：
+git push origin feature/langgraph-agent-v1
+git push origin v1.2-agent-observability
+
+v2.0 在独立分支 feature/controlled-code-execution-v2 开发，跑通后再考虑 PR / merge。
+如果只想保留试错，不要立刻 merge 到 feature/langgraph-agent-v1。
+
+二十一、常用运行方式
+
+启动 PostgreSQL：
+docker start insightflow-postgres
+
+启动后端：
+cd D:\Emory_MSCS\DAgent\InsightFlow\backend
+python -m uvicorn app.main:app --reload
+
+后端：
+http://localhost:8000
+Swagger：
+http://localhost:8000/docs
+
+启动前端：
+cd D:\Emory_MSCS\DAgent\InsightFlow\frontend
+npm install
+npm run dev
+
+前端：
+http://localhost:5173
+
+注意：
+- 后端和前端需要两个终端同时运行
+- frontend 请求 backend localhost:8000
+- 不要删除数据库容器，否则历史用户/dataset/session/message 会丢
+- 不要删除 backend/storage/，否则 preview/catalog/agent analysis 可能失效
+- 不要提交 .env、storage、node_modules、generated temp files
+
+二十二、后续建议路线
+
+当前：
+v1.0 Rule-based LangGraph/Pandas Agent ✅
+v1.1 LLM Planner + Response Generator ✅
+v1.2 Agent Trace + Frontend Display + README Architecture ✅
+v2.0 Controlled Pandas Code Execution ✅ 初步跑通核心 query
+
+后续建议：
+1. 先完成 v2.0 版本管理：
+   git status
+   git diff --stat
+   commit
+   tag v2.0-controlled-code-execution
+   push v2 branch/tag
+
+2. 补测 v2.0 failure path：
+   safety blocked
+   runtime retry
+   timeout
+   fixed_tool regression
+
+3. 再考虑是否 merge v2.0 到 feature/langgraph-agent-v1
+
+4. 后续 v2.1 可以做：
+   - More robust code execution guardrails
+   - Better execution_mode decision
+   - Tool Registry + Tool Selection Improvements
+   - Column resolver / fuzzy matching
+   - Better code repair prompt
+   - Optional Docker sandbox runner
+   - Demo dataset + test cases + demo guide
+
+5. 暂时不要做：
+   - multi-agent
+   - arbitrary code execution
+   - SQL agent
+   - AutoML
+   - production-grade sandbox claim
+   - long-term vector memory
